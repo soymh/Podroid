@@ -246,9 +246,43 @@ RUN printf '#!/bin/sh\nexport PKG_CONFIG_LIBDIR=/opt/deps/lib/pkgconfig\nexport 
 
 COPY build-tools/cross-android-aarch64.ini /opt/cross-android-aarch64.ini
 
-# Deps (pcre2, libffi, libiconv, glib, pixman, libattr, libucontext)
-RUN wget -q https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.44/pcre2-10.44.tar.gz && tar xf pcre2-10.44.tar.gz && cd pcre2-10.44 && ./configure --host=aarch64-linux-android --prefix=${PREFIX} --enable-static --disable-shared CC="${CC}" && make -j$(nproc) install
-RUN wget -q https://github.com/libffi/libffi/releases/download/v3.4.6/libffi-3.4.6.tar.gz && tar xf libffi-3.4.6.tar.gz && cd libffi-3.4.6 && ./configure --host=aarch64-linux-android --prefix=${PREFIX} --enable-static --disable-shared CC="${CC}" && make -j$(nproc) install
+# Vendored dependency tarballs (build-tools/) are preferred; wget with a 60s
+# timeout is the fallback. download.savannah.gnu.org has been returning 502
+# Bad Gateway intermittently in CI, so the attr download is especially fragile.
+# SHA-256 checks catch corruption of the vendored copies.
+COPY build-tools/pcre2-10.44.tar.gz       /tmp/pcre2-10.44.tar.gz
+COPY build-tools/libffi-3.4.6.tar.gz      /tmp/libffi-3.4.6.tar.gz
+COPY build-tools/glib-2.82.5.tar.xz       /tmp/glib-2.82.5.tar.xz
+COPY build-tools/pixman-0.44.2.tar.xz     /tmp/pixman-0.44.2.tar.xz
+COPY build-tools/attr-2.5.2.tar.gz        /tmp/attr-2.5.2.tar.gz
+COPY build-tools/libusb-1.0.27.tar.bz2    /tmp/libusb-1.0.27.tar.bz2
+
+# pcre2 10.44
+RUN set -eux; \
+    cd /tmp && \
+    expected_sha="86b9cb0aa3bcb7994faa88018292bc704cdbb708e785f7c74352ff6ea7d3175b"; \
+    if [ ! -f pcre2-10.44.tar.gz ] || [ "$(sha256sum pcre2-10.44.tar.gz | cut -d' ' -f1)" != "$expected_sha" ]; then \
+        rm -f pcre2-10.44.tar.gz; \
+        wget --tries=2 --timeout=60 https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.44/pcre2-10.44.tar.gz -O pcre2-10.44.tar.gz; \
+    fi; \
+    test -s pcre2-10.44.tar.gz; \
+    tar xf pcre2-10.44.tar.gz && cd pcre2-10.44 && \
+    ./configure --host=aarch64-linux-android --prefix=${PREFIX} --enable-static --disable-shared CC="${CC}" && \
+    make -j$(nproc) install
+
+# libffi 3.4.6
+RUN set -eux; \
+    cd /tmp && \
+    expected_sha="b0dea9df23c863a7a50e825440f3ebffabd65df1497108e5d437747843895a4e"; \
+    if [ ! -f libffi-3.4.6.tar.gz ] || [ "$(sha256sum libffi-3.4.6.tar.gz | cut -d' ' -f1)" != "$expected_sha" ]; then \
+        rm -f libffi-3.4.6.tar.gz; \
+        wget --tries=2 --timeout=60 https://github.com/libffi/libffi/releases/download/v3.4.6/libffi-3.4.6.tar.gz -O libffi-3.4.6.tar.gz; \
+    fi; \
+    test -s libffi-3.4.6.tar.gz; \
+    tar xf libffi-3.4.6.tar.gz && cd libffi-3.4.6 && \
+    ./configure --host=aarch64-linux-android --prefix=${PREFIX} --enable-static --disable-shared CC="${CC}" && \
+    make -j$(nproc) install
+
 # API-26 Bionic lacks iconv symbols in libc. Provide a tiny libiconv shim so
 # glib can link in the cross build. It implements byte-for-byte passthrough.
 RUN printf '#ifndef PODROID_ICONV_H\n#define PODROID_ICONV_H\n#include <stddef.h>\ntypedef void *iconv_t;\niconv_t iconv_open(const char *tocode, const char *fromcode);\nsize_t iconv(iconv_t cd, char **inbuf, size_t *inbytesleft, char **outbuf, size_t *outbytesleft);\nint iconv_close(iconv_t cd);\n#endif\n' > ${PREFIX}/include/iconv.h \
@@ -256,9 +290,56 @@ RUN printf '#ifndef PODROID_ICONV_H\n#define PODROID_ICONV_H\n#include <stddef.h
     && ${CC} --sysroot=${LLVM}/sysroot -target aarch64-linux-android26 -I${PREFIX}/include -c /tmp/iconv_shim.c -o /tmp/iconv_shim.o \
     && ${AR} rcs ${PREFIX}/lib/libiconv.a /tmp/iconv_shim.o \
     && cp ${PREFIX}/lib/libiconv.a ${LLVM}/sysroot/usr/lib/aarch64-linux-android/26/libiconv.a
-RUN wget -q https://download.gnome.org/sources/glib/2.82/glib-2.82.5.tar.xz&& tar xf glib-2.82.5.tar.xz && cd glib-2.82.5 && meson setup _build --cross-file /opt/cross-android-aarch64.ini --prefix ${PREFIX} --default-library static -Dselinux=disabled -Dlibmount=disabled && ninja -C _build install
-RUN wget -q https://cairographics.org/releases/pixman-0.44.2.tar.xz && tar xf pixman-0.44.2.tar.xz && cd pixman-0.44.2 && meson setup _build --cross-file /opt/cross-android-aarch64.ini --prefix ${PREFIX} --default-library static -Da64-neon=disabled && ninja -C _build install
-RUN wget --tries=3 --retry-connrefused https://download.savannah.gnu.org/releases/attr/attr-2.5.2.tar.gz && tar xf attr-2.5.2.tar.gz && cd attr-2.5.2 && ./configure --host=aarch64-linux-android --prefix=${PREFIX} --enable-static --disable-shared CC="${CC}" && make -j$(nproc) install && cp ${PREFIX}/lib/libattr.a ${LLVM}/sysroot/usr/lib/aarch64-linux-android/26/libattr.a
+
+# glib 2.82.5
+RUN set -eux; \
+    cd /tmp && \
+    expected_sha="05c2031f9bdf6b5aba7a06ca84f0b4aced28b19bf1b50c6ab25cc675277cbc3f"; \
+    if [ ! -f glib-2.82.5.tar.xz ] || [ "$(sha256sum glib-2.82.5.tar.xz | cut -d' ' -f1)" != "$expected_sha" ]; then \
+        rm -f glib-2.82.5.tar.xz; \
+        wget --tries=2 --timeout=60 https://download.gnome.org/sources/glib/2.82/glib-2.82.5.tar.xz -O glib-2.82.5.tar.xz; \
+    fi; \
+    test -s glib-2.82.5.tar.xz; \
+    tar xf glib-2.82.5.tar.xz && cd glib-2.82.5 && \
+    meson setup _build --cross-file /opt/cross-android-aarch64.ini --prefix ${PREFIX} --default-library static -Dselinux=disabled -Dlibmount=disabled && \
+    ninja -C _build install
+
+# pixman 0.44.2
+RUN set -eux; \
+    cd /tmp && \
+    expected_sha="50baf820dde0c5ff9714d03d2df4970f606a3d3b1024f5404c0398a9821cc4b0"; \
+    if [ ! -f pixman-0.44.2.tar.xz ] || [ "$(sha256sum pixman-0.44.2.tar.xz | cut -d' ' -f1)" != "$expected_sha" ]; then \
+        rm -f pixman-0.44.2.tar.xz; \
+        wget --tries=2 --timeout=60 https://cairographics.org/releases/pixman-0.44.2.tar.xz -O pixman-0.44.2.tar.xz; \
+    fi; \
+    test -s pixman-0.44.2.tar.xz; \
+    tar xf pixman-0.44.2.tar.xz && cd pixman-0.44.2 && \
+    meson setup _build --cross-file /opt/cross-android-aarch64.ini --prefix ${PREFIX} --default-library static -Da64-neon=disabled && \
+    ninja -C _build install
+
+# attr 2.5.2 — savannah.gnu.org is the most fragile source (intermittent 502s)
+RUN set -eux; \
+    cd /tmp && \
+    expected_sha="39bf67452fa41d0948c2197601053f48b3d78a029389734332a6309a680c6c87"; \
+    if [ ! -f attr-2.5.2.tar.gz ] || [ "$(sha256sum attr-2.5.2.tar.gz | cut -d' ' -f1)" != "$expected_sha" ]; then \
+        rm -f attr-2.5.2.tar.gz; \
+        for url in \
+            "https://ftp.gnu.org/gnu/attr/attr-2.5.2.tar.gz" \
+            "https://git.savannah.gnu.org/cgit/attr.git/snapshot/attr-2.5.2.tar.gz" \
+            "https://download.savannah.gnu.org/releases/attr/attr-2.5.2.tar.gz" \
+        ; do \
+            echo "Trying $url ..."; \
+            if wget --tries=2 --timeout=60 "$url" -O attr-2.5.2.tar.gz; then \
+                break; \
+            fi; \
+        done; \
+    fi; \
+    test -s attr-2.5.2.tar.gz; \
+    tar xf attr-2.5.2.tar.gz && cd attr-2.5.2 && \
+    ./configure --host=aarch64-linux-android --prefix=${PREFIX} --enable-static --disable-shared CC="${CC}" && \
+    make -j$(nproc) install && \
+    cp ${PREFIX}/lib/libattr.a ${LLVM}/sysroot/usr/lib/aarch64-linux-android/26/libattr.a
+
 RUN git clone --depth=1 https://github.com/kaniini/libucontext.git /tmp/libucontext && make -C /tmp/libucontext ARCH=aarch64 CC="${CC}" EXPORT_UNPREFIXED=yes && install -Dm644 /tmp/libucontext/libucontext.a ${PREFIX}/lib/libucontext.a && install -Dm644 /tmp/libucontext/include/libucontext/libucontext.h ${PREFIX}/include/libucontext/libucontext.h && install -Dm644 /tmp/libucontext/arch/common/include/libucontext/bits.h ${PREFIX}/include/libucontext/bits.h \
     && printf '#ifndef PODROID_UCONTEXT_SHIM_H\n#define PODROID_UCONTEXT_SHIM_H\n#include_next <ucontext.h>\n#include <libucontext/libucontext.h>\n#define getcontext libucontext_getcontext\n#define makecontext libucontext_makecontext\n#define setcontext libucontext_setcontext\n#define swapcontext libucontext_swapcontext\n#endif\n' > ${PREFIX}/include/ucontext.h
 
@@ -266,10 +347,17 @@ RUN git clone --depth=1 https://github.com/kaniini/libucontext.git /tmp/libucont
 # never open /dev/bus/usb itself, so QEMU receives an already-open fd over QMP
 # and hands it to libusb_wrap_sys_device(); --disable-udev because Android has
 # no udev and we never enumerate (every device arrives as a passed-in fd).
-RUN wget -q https://github.com/libusb/libusb/releases/download/v1.0.27/libusb-1.0.27.tar.bz2 \
-    && tar xf libusb-1.0.27.tar.bz2 && cd libusb-1.0.27 \
-    && ./configure --host=aarch64-linux-android --prefix=${PREFIX} --enable-static --disable-shared --disable-udev CC="${CC}" \
-    && make -j$(nproc) install
+RUN set -eux; \
+    cd /tmp && \
+    expected_sha="ffaa41d741a8a3bee244ac8e54a72ea05bf2879663c098c82fc5757853441575"; \
+    if [ ! -f libusb-1.0.27.tar.bz2 ] || [ "$(sha256sum libusb-1.0.27.tar.bz2 | cut -d' ' -f1)" != "$expected_sha" ]; then \
+        rm -f libusb-1.0.27.tar.bz2; \
+        wget --tries=2 --timeout=60 https://github.com/libusb/libusb/releases/download/v1.0.27/libusb-1.0.27.tar.bz2 -O libusb-1.0.27.tar.bz2; \
+    fi; \
+    test -s libusb-1.0.27.tar.bz2; \
+    tar xf libusb-1.0.27.tar.bz2 && cd libusb-1.0.27 && \
+    ./configure --host=aarch64-linux-android --prefix=${PREFIX} --enable-static --disable-shared --disable-udev CC="${CC}" && \
+    make -j$(nproc) install
 
 # QEMU Build (committed flags — no LTO, no -O3 — plus minimal Android compat patches)
 RUN wget -q https://download.qemu.org/${QEMU_DIR}.tar.xz && tar xf ${QEMU_DIR}.tar.xz
