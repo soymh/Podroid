@@ -19,14 +19,16 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build kernel
-        run: ./build-all.sh kernel
+      - name: Build kernel + initramfs
+        run: ./build-all.sh initramfs
 
-      - name: Upload kernel artifact
+      - name: Upload kernel + initramfs artifact
         uses: actions/upload-artifact@v4
         with:
           name: kernel
-          path: app/src/main/assets/kernel
+          path: |
+            app/src/main/assets/vmlinuz-virt
+            app/src/main/assets/initrd.img
           retention-days: 1
 
   build-rootfs:
@@ -68,11 +70,18 @@ jobs:
       - name: Build QEMU + bridge
         run: ./build-all.sh qemu
 
-      - name: Upload QEMU artifacts
+      - name: Upload QEMU libraries
         uses: actions/upload-artifact@v4
         with:
           name: qemu-libs
           path: app/src/main/jniLibs/
+          retention-days: 1
+
+      - name: Upload QEMU assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: qemu-assets
+          path: app/src/main/assets/qemu/
           retention-days: 1
 
   build-apk:
@@ -98,6 +107,12 @@ jobs:
         with:
           name: qemu-libs
           path: app/src/main/jniLibs/
+
+      - name: Download QEMU assets
+        uses: actions/download-artifact@v4
+        with:
+          name: qemu-assets
+          path: app/src/main/assets/qemu/
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
