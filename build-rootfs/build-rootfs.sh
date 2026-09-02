@@ -13,6 +13,9 @@ https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_BRANCH}/main
 https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_BRANCH}/community
 EOF
 
+mkdir -p "$ROOTFS/etc"
+printf 'nameserver 8.8.8.8\nnameserver 1.1.1.1\n' > "$ROOTFS/etc/resolv.conf"
+
 apk -X "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_BRANCH}/main" \
     -X "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_BRANCH}/community" \
     -U --allow-untrusted --root "$ROOTFS" --initdb add \
