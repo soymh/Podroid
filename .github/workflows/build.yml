@@ -67,6 +67,17 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Diagnose attr download
+        run: |
+          echo "=== Testing attr download (diagnostic) ==="
+          wget -v https://download.savannah.gnu.org/releases/attr/attr-2.5.2.tar.gz -O /tmp/attr-test.tar.gz 2>&1 || true
+          ls -la /tmp/attr-test.tar.gz 2>/dev/null || echo "Download failed"
+          echo "=== Trying alternative mirrors ==="
+          wget -v https://mirror.csclub.uwaterloo.ca/attr/attr-2.5.2.tar.gz -O /tmp/attr-mirror1.tar.gz 2>&1 || true
+          ls -la /tmp/attr-mirror1.tar.gz 2>/dev/null || echo "Mirror 1 failed"
+          wget -v https://ftp.gnu.org/gnu/attr/attr-2.5.2.tar.gz -O /tmp/attr-gnu.tar.gz 2>&1 || true
+          ls -la /tmp/attr-gnu.tar.gz 2>/dev/null || echo "GNU FTP failed"
+
       - name: Build QEMU + bridge
         run: ./build-all.sh qemu
 
