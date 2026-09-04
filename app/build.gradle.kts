@@ -40,11 +40,15 @@ android {
     signingConfigs {
         create("release") {
             val storePath = (project.findProperty("PODROID_RELEASE_STORE_FILE") as? String)
+                ?: System.getenv("PODROID_RELEASE_STORE_FILE")
             if (storePath != null && file(storePath).exists()) {
                 storeFile     = file(storePath)
-                storePassword = project.findProperty("PODROID_RELEASE_STORE_PASSWORD") as? String
-                keyAlias      = project.findProperty("PODROID_RELEASE_KEY_ALIAS")      as? String
-                keyPassword   = project.findProperty("PODROID_RELEASE_KEY_PASSWORD")   as? String
+                storePassword = (project.findProperty("PODROID_RELEASE_STORE_PASSWORD") as? String)
+                    ?: System.getenv("PODROID_RELEASE_STORE_PASSWORD")
+                keyAlias      = (project.findProperty("PODROID_RELEASE_KEY_ALIAS") as? String)
+                    ?: System.getenv("PODROID_RELEASE_KEY_ALIAS")
+                keyPassword   = (project.findProperty("PODROID_RELEASE_KEY_PASSWORD") as? String)
+                    ?: System.getenv("PODROID_RELEASE_KEY_PASSWORD")
             }
         }
     }
@@ -57,7 +61,9 @@ android {
             versionNameSuffix = "-debug"
         }
         release {
-            signingConfig = signingConfigs.getByName("release")
+            val releaseSigning = signingConfigs.getByName("release")
+            signingConfig = if (releaseSigning.storeFile != null) releaseSigning
+                            else signingConfigs.getByName("debug")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
