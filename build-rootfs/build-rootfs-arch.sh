@@ -3,7 +3,7 @@
 # Mirrors build-rootfs.sh: no chroot (x86_64 host can't exec aarch64 bins
 # without extra setup), so all runlevel wiring is done via direct symlinks.
 set -eu
-ROOTFS=/work/rootfs
+: "${ROOTFS:=/work/rootfs}"
 
 mkdir -p "$ROOTFS/etc"
 printf 'nameserver 8.8.8.8\nnameserver 1.1.1.1\n' > "$ROOTFS/etc/resolv.conf"

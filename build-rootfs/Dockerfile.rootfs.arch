@@ -11,7 +11,7 @@
 # so stock LUKS2 works out of the box.
 #
 # OpenRC comes from the AUR (not in Arch official repos); everything else
-# installs from the official ArchLinuxARM repos via chroot pacman.
+# installs from the official ArchLinuxARM repos with plain pacman.
 
 # ── Stage 1: cross-compile podroid helpers (musl-static aarch64) ──────────
 # Identical to Dockerfile.rootfs — reused unchanged so the guest<->Android
@@ -30,55 +30,53 @@ RUN cd /work/overlay-normalize && make CC=gcc
 # ── Stage 2: bootstrap + customize the Arch rootfs ────────────────────────
 # NOTE: the official archlinux image is amd64-only (no arm64 manifest), so it
 # can never resolve with --platform=linux/arm64. Instead we bootstrap from the
-# official ArchLinuxARM aarch64 tarball and customize it in place via chroot —
-# same arch under qemu-user emulation, no cross tricks.
+# official ArchLinuxARM aarch64 tarball, promoted to a real container stage so
+# docker provides /dev + /proc (chroot-in-build cannot: no Landlock for
+# pacman's sandbox, no mtab without proc, no /dev/fd for makepkg's process
+# substitution — three separate failures before this shape).
 # openrc is AUR-only (built with --ignorearch: upstream tags i686/x86_64 only);
 # OpenRC service files come from openrc-arch-services-git (pinned to a known
 # commit for reproducibility). Both build as non-root (makepkg refuses root).
 # NOTE: ArchLinuxARM ships neither elogind (it uses systemd-logind, which has
 # no OpenRC support and isn't needed headless) nor bridge-utils (deprecated;
 # iproute2 covers bridge setup) — do not re-add them.
-FROM --platform=linux/arm64 alpine:3.24 AS arch-builder
+FROM --platform=linux/arm64 alpine:3.24 AS alarm-fetch
 
-ARG SYSTEM_VERSION=0
-ENV SYSTEM_VERSION=${SYSTEM_VERSION}
+RUN apk add --no-cache curl tar
 
-RUN apk add --no-cache curl tar squashfs-tools openssl libcap
-
-WORKDIR /work
+WORKDIR /alarm
 
 # Fetch + unpack the ArchLinuxARM aarch64 minimal rootfs.
 RUN curl -L --retry 3 -o alarm.tar.gz \
         http://os.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz \
-    && mkdir -p alarmroot \
-    && tar -xzpf alarm.tar.gz -C alarmroot \
+    && mkdir -p root \
+    && tar -xzpf alarm.tar.gz -C root \
     && rm alarm.tar.gz
 
-# Keyring + full upgrade inside the target. Fail-fast throughout: any error
-# aborts the build (CI goes red) instead of shipping a broken squashfs.
-# - Pacman 7 sandboxes downloads via Landlock + an unprivileged `alpm` user;
-#   build containers lack Landlock, so DB sync fails without DisableSandbox
-#   (the documented container escape hatch; guest runtime is unaffected).
-# - libalpm requires /etc/mtab to resolve mount points (disk-space checks);
-#   a chroot has no proc mount, so ship a static `/` entry (enough for the
-#   statvfs lookups; remove any dangling symlink first).
-RUN mkdir -p /work/alarmroot/dev \
-    && for dev in "null c 1 3" "zero c 1 5" "random c 1 8" "urandom c 1 9"; do \
-           set -- $dev; \
-           [ -e "/work/alarmroot/dev/$1" ] || mknod -m 666 "/work/alarmroot/dev/$1" $2 $3 $4 2>/dev/null || true; \
-       done \
-    && rm -f /work/alarmroot/etc/mtab \
-    && printf '/ / overlay rw,relatime 0 0\n' > /work/alarmroot/etc/mtab \
-    && sed -i '/^#*DisableSandbox/d; /^\[options\]/a DisableSandbox' /work/alarmroot/etc/pacman.conf \
-    && grep -q '^DisableSandbox' /work/alarmroot/etc/pacman.conf \
-    && cp /etc/resolv.conf /work/alarmroot/etc/resolv.conf \
-    && chroot /work/alarmroot pacman-key --init \
-    && chroot /work/alarmroot pacman-key --populate archlinuxarm \
-    && chroot /work/alarmroot pacman -Syu --noconfirm
+# ── Stage 3: customize the Arch rootfs (real container, no chroot) ─────────
+FROM scratch AS arch-builder
+COPY --from=alarm-fetch /alarm/root/ / /
+
+ARG SYSTEM_VERSION=0
+ENV SYSTEM_VERSION=${SYSTEM_VERSION}
+
+WORKDIR /work
+
+# Pacman 7 sandboxes downloads via Landlock + an unprivileged `alpm` user;
+# build containers lack Landlock, so DB sync fails without DisableSandbox
+# (the documented container escape hatch; guest runtime is unaffected).
+RUN sed -i '/^#*DisableSandbox/d; /^\[options\]/a DisableSandbox' /etc/pacman.conf \
+    && grep -q '^DisableSandbox' /etc/pacman.conf
+
+# Keyring + full upgrade. Fail-fast throughout: any error aborts the build
+# (CI goes red) instead of shipping a broken squashfs.
+RUN pacman-key --init \
+    && pacman-key --populate archlinuxarm \
+    && pacman -Syu --noconfirm
 
 # Guest runtime packages. base-devel + git are build-time only (AUR makepkg)
 # and get removed again before packing; sudo stays (wheel users, like Alpine).
-RUN chroot /work/alarmroot pacman -S --noconfirm --needed \
+RUN pacman -S --noconfirm --needed \
         base \
         filesystem \
         bash \
@@ -113,16 +111,16 @@ RUN chroot /work/alarmroot pacman -S --noconfirm --needed \
         git
 
 # Build + install the AUR OpenRC stack as non-root (makepkg refuses root).
-RUN chroot /work/alarmroot useradd -m builder \
-    && chroot /work/alarmroot sh -c "echo 'builder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder" \
-    && chroot /work/alarmroot chmod 0440 /etc/sudoers.d/builder \
-    && mkdir -p /work/alarmroot/tmp/aur \
-    && chroot /work/alarmroot chown builder:builder /tmp/aur \
-    && chroot /work/alarmroot sudo -u builder bash -c 'set -e; cd /tmp/aur \
+RUN useradd -m builder \
+    && echo 'builder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder \
+    && chmod 0440 /etc/sudoers.d/builder \
+    && mkdir -p /tmp/aur \
+    && chown builder:builder /tmp/aur \
+    && sudo -u builder bash -c 'set -e; cd /tmp/aur \
         && git clone --depth 1 https://aur.archlinux.org/openrc.git \
         && cd openrc && makepkg -s --ignorearch --noconfirm \
         && sudo pacman -U --noconfirm ./*.pkg.tar*' \
-    && chroot /work/alarmroot sudo -u builder bash -c 'set -e; cd /tmp/aur \
+    && sudo -u builder bash -c 'set -e; cd /tmp/aur \
         && git clone --depth 1 https://aur.archlinux.org/openrc-arch-services-git.git \
         && cd openrc-arch-services-git \
         && git fetch --depth 1 origin a6ab4db0d4401886f713f89ab4d3ee8d24b04cd8 \
@@ -130,29 +128,40 @@ RUN chroot /work/alarmroot useradd -m builder \
         && makepkg -s --noconfirm \
         && sudo pacman -U --noconfirm ./*.pkg.tar*'
 
-# Drop build-time weight, then promote the tree to /work/rootfs (the path
-# build-rootfs-arch.sh and mksquashfs expect — unchanged below).
-# linux-aarch64 is the distro kernel, not ours — remove only if present.
-RUN chroot /work/alarmroot pacman -Rns --noconfirm base-devel git \
-    && if chroot /work/alarmroot pacman -Qq linux-aarch64 >/dev/null 2>&1; then \
-           chroot /work/alarmroot pacman -Rns --noconfirm linux-aarch64; \
+# Drop build-time weight: dev toolchain, package cache, temp dirs, helper
+# account. linux-aarch64 is the distro kernel, not ours — remove only if present.
+RUN pacman -Rns --noconfirm base-devel git \
+    && pacman -Scc --noconfirm \
+    && if pacman -Qq linux-aarch64 >/dev/null 2>&1; then \
+           pacman -Rns --noconfirm linux-aarch64; \
        fi \
-    && chroot /work/alarmroot userdel -r builder \
-    && rm -rf /work/alarmroot/tmp/aur /work/alarmroot/etc/sudoers.d/builder \
-    && mv /work/alarmroot /work/rootfs
+    && userdel -r builder \
+    && rm -rf /tmp/aur /etc/sudoers.d/builder
 
 # Hard assertion: the rootfs must contain openrc-run before packing.
 # Without it the guest cannot boot (init-podroid execs /sbin/init).
-RUN test -x /work/rootfs/usr/bin/openrc-run || test -x /work/rootfs/sbin/openrc-run || { echo "ERROR: openrc-run missing from rootfs"; exit 1; }
+RUN test -x /usr/bin/openrc-run || test -x /sbin/openrc-run || { echo "ERROR: openrc-run missing from rootfs"; exit 1; }
 
 # Pull in the vsock-agent / host-bridge binaries built in stage 1.
-COPY --from=vsock-builder /work/vsock-agent/podroid-vsock-agent /work/rootfs/usr/local/bin/podroid-vsock-agent
-COPY --from=vsock-builder /work/host-bridge/podroid-hostd /work/rootfs/usr/local/bin/podroid-hostd
-COPY --from=vsock-builder /work/overlay-normalize/podroid-overlay-normalize /work/rootfs/usr/local/bin/podroid-overlay-normalize
+COPY --from=vsock-builder /work/vsock-agent/podroid-vsock-agent /usr/local/bin/podroid-vsock-agent
+COPY --from=vsock-builder /work/host-bridge/podroid-hostd /usr/local/bin/podroid-hostd
+COPY --from=vsock-builder /work/overlay-normalize/podroid-overlay-normalize /usr/local/bin/podroid-overlay-normalize
 
 COPY files /work/files
 COPY build-rootfs-arch.sh /work/build-rootfs-arch.sh
-RUN chmod +x /work/build-rootfs-arch.sh && /work/build-rootfs-arch.sh
+# ROOTFS=/ : customize the stage root itself (it IS the target rootfs).
+RUN chmod +x /work/build-rootfs-arch.sh && ROOTFS=/ /work/build-rootfs-arch.sh
+
+# Relocate the tree under /work/rootfs for packing. tar copy (not mv — the
+# stage root is live): excludes are build-only paths + runtime pseudo-mounts
+# (recreated empty below). /etc/mtab is docker's symlink — excluded and
+# recreated as a /proc/self/mounts symlink (standard; live guest has /proc).
+RUN mkdir -p /work/rootfs \
+    && tar -C / --exclude=./work --exclude=./proc --exclude=./sys --exclude=./dev --exclude=./tmp --exclude=./run --exclude=./etc/mtab --exclude=./.dockerenv -cf - . \
+        | tar -xpf - -C /work/rootfs \
+    && mkdir -p /work/rootfs/dev /work/rootfs/proc /work/rootfs/sys /work/rootfs/tmp /work/rootfs/run \
+    && chmod 1777 /work/rootfs/tmp \
+    && ln -sf /proc/self/mounts /work/rootfs/etc/mtab
 
 RUN mksquashfs /work/rootfs /work/arch-rootfs.squashfs \
     -comp zstd -Xcompression-level 19 -all-root -noappend
