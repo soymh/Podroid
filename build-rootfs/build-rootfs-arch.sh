@@ -33,9 +33,18 @@ sed -i "s|^root:[^:]*:|root:${ROOT_HASH}:|" "$ROOTFS/etc/shadow"
 rm -rf "$ROOTFS/usr/share/man" "$ROOTFS/usr/share/doc" \
        "$ROOTFS/usr/share/locale" "$ROOTFS/usr/share/info"
 
-# Remove the stock pulseaudio OpenRC service if the AUR set shipped one.
+# AUR openrc uses sysconfdir=/etc/openrc (avoids clashing with other init
+# systems): init scripts live in /etc/openrc/init.d, runlevels in
+# /etc/openrc/runlevels, rc.conf in /etc/openrc/rc.conf. All OpenRC paths
+# below go through $OERC. (/sbin/openrc* shebangs/paths still resolve via
+# the /sbin -> /usr/bin usrmerge symlink; /etc/inittab stays at /etc
+# because busybox init reads it there.)
+OERC="$ROOTFS/etc/openrc"
+mkdir -p "$OERC/init.d"
+
+# Remove the stock pulseaudio OpenRC service if one was shipped.
 # Podroid starts pulseaudio directly from podroid-x11 (start-stop-daemon).
-rm -f "$ROOTFS/etc/init.d/pulseaudio"
+rm -f "$OERC/init.d/pulseaudio"
 
 # Pre-create podman storage dirs (saves first-boot mkdir).
 mkdir -p "$ROOTFS/var/lib/containers/storage" \
@@ -44,22 +53,22 @@ mkdir -p "$ROOTFS/var/lib/containers/storage" \
          "$ROOTFS/run/crun"
 
 # Copy Podroid OpenRC services (shared with Alpine).
-cp /work/files/etc/init.d/podroid-bootstrap "$ROOTFS/etc/init.d/"
-cp /work/files/etc/init.d/podroid-network   "$ROOTFS/etc/init.d/"
-cp /work/files/etc/init.d/podroid-resize    "$ROOTFS/etc/init.d/"
-cp /work/files/etc/init.d/podroid-ready     "$ROOTFS/etc/init.d/"
-cp /work/files/etc/init.d/podroid-x11       "$ROOTFS/etc/init.d/"
-cp /work/files/etc/init.d/podroid-vsock     "$ROOTFS/etc/init.d/"
-cp /work/files/etc/init.d/podroid-hostd     "$ROOTFS/etc/init.d/"
-cp /work/files/etc/init.d/podroid-downloads "$ROOTFS/etc/init.d/"
-cp /work/files/etc/init.d/podroid-migrate   "$ROOTFS/etc/init.d/"
-chmod +x "$ROOTFS/etc/init.d/podroid-"*
+cp /work/files/etc/init.d/podroid-bootstrap "$OERC/init.d/"
+cp /work/files/etc/init.d/podroid-network   "$OERC/init.d/"
+cp /work/files/etc/init.d/podroid-resize    "$OERC/init.d/"
+cp /work/files/etc/init.d/podroid-ready     "$OERC/init.d/"
+cp /work/files/etc/init.d/podroid-x11       "$OERC/init.d/"
+cp /work/files/etc/init.d/podroid-vsock     "$OERC/init.d/"
+cp /work/files/etc/init.d/podroid-hostd     "$OERC/init.d/"
+cp /work/files/etc/init.d/podroid-downloads "$OERC/init.d/"
+cp /work/files/etc/init.d/podroid-migrate   "$OERC/init.d/"
+chmod +x "$OERC/init.d/podroid-"*
 
 # Minimal OpenRC wrappers for Arch-native daemons (same openrc-run style as
 # podroid-* scripts). Arch has no docker-openrc / lxc-openrc / dropbear-openrc
 # splits, so we ship tiny equivalents here instead of in files/ (keeps the
 # Alpine tree untouched).
-cat > "$ROOTFS/etc/init.d/docker" <<'EOF'
+cat > "$OERC/init.d/docker" <<'EOF'
 #!/sbin/openrc-run
 description="Docker daemon"
 command="/usr/bin/dockerd"
@@ -70,7 +79,7 @@ depend() {
     after podroid-bootstrap
 }
 EOF
-cat > "$ROOTFS/etc/init.d/sshd" <<'EOF'
+cat > "$OERC/init.d/sshd" <<'EOF'
 #!/sbin/openrc-run
 description="OpenSSH server"
 command="/usr/bin/sshd"
@@ -83,7 +92,7 @@ start_pre() {
     [ -f /etc/ssh/ssh_host_ed25519_key ] || ssh-keygen -A
 }
 EOF
-cat > "$ROOTFS/etc/init.d/lxc" <<'EOF'
+cat > "$OERC/init.d/lxc" <<'EOF'
 #!/sbin/openrc-run
 description="LXC container autostart"
 command="/usr/bin/lxc-autostart"
@@ -103,7 +112,7 @@ stop() {
     eend 0
 }
 EOF
-cat > "$ROOTFS/etc/init.d/dnsmasq.lxcbr0" <<'EOF'
+cat > "$OERC/init.d/dnsmasq.lxcbr0" <<'EOF'
 #!/sbin/openrc-run
 description="LXC bridge (lxcbr0, 10.0.3.1/24) + NAT/DHCP"
 depend() {
@@ -128,8 +137,8 @@ stop() {
     return 0
 }
 EOF
-chmod +x "$ROOTFS/etc/init.d/docker" "$ROOTFS/etc/init.d/sshd" \
-         "$ROOTFS/etc/init.d/lxc" "$ROOTFS/etc/init.d/dnsmasq.lxcbr0"
+chmod +x "$OERC/init.d/docker" "$OERC/init.d/sshd" \
+         "$OERC/init.d/lxc" "$OERC/init.d/dnsmasq.lxcbr0"
 
 # Copy /usr/local/bin helpers.
 mkdir -p "$ROOTFS/usr/local/bin"
@@ -148,8 +157,8 @@ ln -sf podroid-hostd "$ROOTFS/usr/local/bin/podroid-power"
 ln -sf podroid-hostd "$ROOTFS/usr/local/bin/podroid-headless"
 ln -sf podroid-hostd "$ROOTFS/usr/local/bin/podroid-server"
 chmod +x "$ROOTFS/usr/local/bin/podroid-"*
-mkdir -p "$ROOTFS/etc/conf.d"
-cp /work/files/etc/conf.d/podroid "$ROOTFS/etc/conf.d/"
+mkdir -p "$OERC/conf.d"
+cp /work/files/etc/conf.d/podroid "$OERC/conf.d/"
 mkdir -p "$ROOTFS/etc/podroid"
 cp /work/files/etc/podroid/forwards.conf "$ROOTFS/etc/podroid/forwards.conf"
 chmod 0644 "$ROOTFS/etc/podroid/forwards.conf"
@@ -159,7 +168,7 @@ cp /work/files/etc/podroid/migrations/README "$ROOTFS/etc/podroid/migrations/REA
 printf '%s\n' "${SYSTEM_VERSION:-0}" > "$ROOTFS/etc/podroid/system-version"
 chmod 0644 "$ROOTFS/etc/podroid/system-version"
 cp /work/files/etc/inittab "$ROOTFS/etc/inittab"
-cp /work/files/etc/rc.conf "$ROOTFS/etc/rc.conf"
+cp /work/files/etc/rc.conf "$OERC/rc.conf"
 
 # /etc/profile.d helpers (same as Alpine).
 mkdir -p "$ROOTFS/etc/profile.d"
@@ -190,16 +199,16 @@ Kernel \r on \m (\l)
 EOF
 
 # Set runlevels via direct symlinks (can't chroot into aarch64 rootfs to run rc-update).
-mkdir -p "$ROOTFS/etc/runlevels/default" "$ROOTFS/etc/runlevels/boot"
+mkdir -p "$OERC/runlevels/default" "$OERC/runlevels/boot"
 for svc in podroid-migrate podroid-bootstrap podroid-network podroid-resize sshd docker lxc dnsmasq.lxcbr0 podroid-x11 podroid-vsock podroid-downloads podroid-hostd podroid-ready; do
-    if [ -e "$ROOTFS/etc/init.d/$svc" ]; then
-        ln -sf "/etc/init.d/$svc" "$ROOTFS/etc/runlevels/default/$svc"
+    if [ -e "$OERC/init.d/$svc" ]; then
+        ln -sf "/etc/openrc/init.d/$svc" "$OERC/runlevels/default/$svc"
     else
-        echo "WARN: init script /etc/init.d/$svc missing, skipping runlevel symlink"
+        echo "WARN: init script /etc/openrc/init.d/$svc missing, skipping runlevel symlink"
     fi
 done
 
 # Disable services we don't need (initramfs already handles them, or they're noise in the VM).
 for svc in hwclock swclock urandom networking sysctl bootmisc syslog keymaps; do
-    rm -f "$ROOTFS/etc/runlevels/boot/$svc" "$ROOTFS/etc/runlevels/default/$svc"
+    rm -f "$OERC/runlevels/boot/$svc" "$OERC/runlevels/default/$svc"
 done
