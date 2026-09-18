@@ -150,19 +150,22 @@ COPY --from=vsock-builder /work/overlay-normalize/podroid-overlay-normalize /usr
 
 COPY files /work/files
 COPY build-rootfs-arch.sh /work/build-rootfs-arch.sh
-# ROOTFS=/ : customize the stage root itself (it IS the target rootfs).
-RUN chmod +x /work/build-rootfs-arch.sh && ROOTFS=/ /work/build-rootfs-arch.sh
 
-# Relocate the tree under /work/rootfs for packing. tar copy (not mv — the
-# stage root is live): excludes are build-only paths + runtime pseudo-mounts
-# (recreated empty below). /etc/mtab is docker's symlink — excluded and
-# recreated as a /proc/self/mounts symlink (standard; live guest has /proc).
+# Relocate the tree under /work/rootfs for customization + packing. tar copy
+# (not mv — the stage root is live): excludes are build-only paths + runtime
+# pseudo-mounts (recreated empty below). /etc/mtab is docker's symlink —
+# excluded and recreated as a /proc/self/mounts symlink (standard; live
+# guest has /proc). Relocation happens BEFORE build-rootfs-arch.sh because
+# the script writes /etc/resolv.conf + hostname + hosts, which are read-only
+# docker bind mounts at the stage root but regular files under /work/rootfs.
 RUN mkdir -p /work/rootfs \
-    && tar -C / --exclude=./work --exclude=./proc --exclude=./sys --exclude=./dev --exclude=./tmp --exclude=./run --exclude=./etc/mtab --exclude=./.dockerenv -cf - . \
+    && tar -C / --exclude=./work --exclude=./proc --exclude=./sys --exclude=./dev --exclude=./tmp --exclude=./run --exclude=./etc/mtab --exclude=./.dockerenv --exclude=./etc/resolv.conf --exclude=./etc/hostname --exclude=./etc/hosts -cf - . \
         | tar -xpf - -C /work/rootfs \
     && mkdir -p /work/rootfs/dev /work/rootfs/proc /work/rootfs/sys /work/rootfs/tmp /work/rootfs/run \
     && chmod 1777 /work/rootfs/tmp \
     && ln -sf /proc/self/mounts /work/rootfs/etc/mtab
+
+RUN chmod +x /work/build-rootfs-arch.sh && /work/build-rootfs-arch.sh
 
 RUN mksquashfs /work/rootfs /work/arch-rootfs.squashfs \
     -comp zstd -Xcompression-level 19 -all-root -noappend
