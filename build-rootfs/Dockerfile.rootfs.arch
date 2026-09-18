@@ -10,9 +10,8 @@
 # CONFIG_CRYPTO_XTS=y, CONFIG_CRYPTO_ARGON2=y, CONFIG_CRYPTO_SHA256=y,
 # so stock LUKS2 works out of the box.
 #
-# OpenRC comes from the AUR (not in Arch official repos), elogind ships in
-# the official repos; both are built/installed with makepkg/pacman as a
-# non-root user inside the arch-builder stage.
+# OpenRC comes from the AUR (not in Arch official repos); everything else
+# installs from the official ArchLinuxARM repos via chroot pacman.
 
 # ── Stage 1: cross-compile podroid helpers (musl-static aarch64) ──────────
 # Identical to Dockerfile.rootfs — reused unchanged so the guest<->Android
@@ -34,8 +33,11 @@ RUN cd /work/overlay-normalize && make CC=gcc
 # official ArchLinuxARM aarch64 tarball and customize it in place via chroot —
 # same arch under qemu-user emulation, no cross tricks.
 # openrc is AUR-only (built with --ignorearch: upstream tags i686/x86_64 only);
-# elogind comes from the official repos; OpenRC service files come from
-# openrc-arch-services-git (pinned to a known commit for reproducibility).
+# OpenRC service files come from openrc-arch-services-git (pinned to a known
+# commit for reproducibility). Both build as non-root (makepkg refuses root).
+# NOTE: ArchLinuxARM ships neither elogind (it uses systemd-logind, which has
+# no OpenRC support and isn't needed headless) nor bridge-utils (deprecated;
+# iproute2 covers bridge setup) — do not re-add them.
 FROM --platform=linux/arm64 alpine:3.24 AS arch-builder
 
 ARG SYSTEM_VERSION=0
@@ -93,12 +95,10 @@ RUN chroot /work/alarmroot pacman -S --noconfirm --needed \
         docker-compose \
         lxc \
         dnsmasq \
-        elogind \
         openssh \
         iptables \
         nftables \
         iproute2 \
-        bridge-utils \
         curl \
         ca-certificates \
         tigervnc \
