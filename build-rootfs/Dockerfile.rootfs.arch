@@ -1,7 +1,7 @@
 # build-rootfs/Dockerfile.rootfs.arch — Arch Linux rootfs (aarch64) for Podroid.
 #
-# Mirrors Dockerfile.rootfs, but bootstraps Arch via pacstrap instead of
-# Alpine minirootfs + apk. Init stays OpenRC (same podroid-* services,
+# Mirrors Dockerfile.rootfs, but bootstraps ArchLinuxARM (aarch64 tarball)
+# instead of Alpine minirootfs + apk. Init stays OpenRC (same podroid-* services,
 # same inittab/rc.conf, same runlevel-symlink approach — no chroot
 # rc-update since the builder host is x86_64).
 #
@@ -10,8 +10,9 @@
 # CONFIG_CRYPTO_XTS=y, CONFIG_CRYPTO_ARGON2=y, CONFIG_CRYPTO_SHA256=y,
 # so stock LUKS2 works out of the box.
 #
-# OpenRC + elogind-openrc come from the AUR (not in Arch official repos),
-# built with makepkg as a non-root user inside the arch-builder stage.
+# OpenRC comes from the AUR (not in Arch official repos), elogind ships in
+# the official repos; both are built/installed with makepkg/pacman as a
+# non-root user inside the arch-builder stage.
 
 # ── Stage 1: cross-compile podroid helpers (musl-static aarch64) ──────────
 # Identical to Dockerfile.rootfs — reused unchanged so the guest<->Android
@@ -28,32 +29,45 @@ COPY overlay-normalize /work/overlay-normalize
 RUN cd /work/overlay-normalize && make CC=gcc
 
 # ── Stage 2: bootstrap + customize the Arch rootfs ────────────────────────
-FROM --platform=linux/arm64 archlinux:latest AS arch-builder
+# NOTE: the official archlinux image is amd64-only (no arm64 manifest), so it
+# can never resolve with --platform=linux/arm64. Instead we bootstrap from the
+# official ArchLinuxARM aarch64 tarball and customize it in place via chroot —
+# same arch under qemu-user emulation, no cross tricks.
+# openrc is AUR-only (built with --ignorearch: upstream tags i686/x86_64 only);
+# elogind comes from the official repos; OpenRC service files come from
+# openrc-arch-services-git (pinned to a known commit for reproducibility).
+FROM --platform=linux/arm64 alpine:3.24 AS arch-builder
 
 ARG SYSTEM_VERSION=0
 ENV SYSTEM_VERSION=${SYSTEM_VERSION}
 
-RUN pacman -Syu --noconfirm \
-    && pacman -S --noconfirm --needed \
-        arch-install-scripts \
-        squashfs-tools \
-        openssl \
-        libcap \
-        base-devel \
-        git \
-        sudo
+RUN apk add --no-cache curl tar squashfs-tools openssl libcap
 
 WORKDIR /work
 
-# pacstrap the base system + Podroid guest packages into /work/rootfs.
-# NOTE: openrc and elogind-openrc are AUR-only; everything else is official.
-RUN mkdir -p /work/rootfs \
-    && pacstrap -c /work/rootfs \
+# Fetch + unpack the ArchLinuxARM aarch64 minimal rootfs.
+RUN curl -L --retry 3 -o alarm.tar.gz \
+        http://os.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz \
+    && mkdir -p alarmroot \
+    && tar -xzpf alarm.tar.gz -C alarmroot \
+    && rm alarm.tar.gz
+
+# Keyring + full upgrade inside the target. Fail-fast throughout: any error
+# aborts the build (CI goes red) instead of shipping a broken squashfs.
+RUN cp /etc/resolv.conf /work/alarmroot/etc/resolv.conf \
+    && chroot /work/alarmroot pacman-key --init \
+    && chroot /work/alarmroot pacman-key --populate archlinuxarm \
+    && chroot /work/alarmroot pacman -Syu --noconfirm
+
+# Guest runtime packages. base-devel + git are build-time only (AUR makepkg)
+# and get removed again before packing; sudo stays (wheel users, like Alpine).
+RUN chroot /work/alarmroot pacman -S --noconfirm --needed \
         base \
         filesystem \
         bash \
         busybox \
         shadow \
+        sudo \
         podman \
         crun \
         fuse-overlayfs \
@@ -64,6 +78,7 @@ RUN mkdir -p /work/rootfs \
         docker-compose \
         lxc \
         dnsmasq \
+        elogind \
         openssh \
         iptables \
         nftables \
@@ -76,35 +91,40 @@ RUN mkdir -p /work/rootfs \
         cryptsetup \
         lvm2 \
         device-mapper \
-        sudo \
         gzip \
         xz \
-        ttf-dejavu
+        ttf-dejavu \
+        base-devel \
+        git
 
-# Build + install AUR OpenRC stack (openrc, elogind-openrc) as non-root.
-# Fail-fast: any AUR failure aborts the build (CI goes red) rather than
-# shipping a squashfs without a working init system.
-RUN set -e \
-    && useradd -m builder \
-    && echo "builder ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/builder \
-    && chmod 0440 /etc/sudoers.d/builder \
-    && mkdir -p /work/aur \
-    && chown builder:builder /work/aur \
-    && sudo -u builder bash -c 'set -e; cd /work/aur \
+# Build + install the AUR OpenRC stack as non-root (makepkg refuses root).
+RUN chroot /work/alarmroot useradd -m builder \
+    && chroot /work/alarmroot sh -c "echo 'builder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder" \
+    && chroot /work/alarmroot chmod 0440 /etc/sudoers.d/builder \
+    && mkdir -p /work/alarmroot/tmp/aur \
+    && chroot /work/alarmroot chown builder:builder /tmp/aur \
+    && chroot /work/alarmroot sudo -u builder bash -c 'set -e; cd /tmp/aur \
         && git clone --depth 1 https://aur.archlinux.org/openrc.git \
-        && cd openrc && makepkg -s --noconfirm \
-        && sudo pacman -U --root /work/rootfs --noconfirm ./*.pkg.tar*' \
-    && sudo -u builder bash -c 'set -e; cd /work/aur \
-        && git clone --depth 1 https://aur.archlinux.org/elogind-openrc.git \
-        && cd elogind-openrc && makepkg -s --noconfirm \
-        && sudo pacman -U --root /work/rootfs --noconfirm ./*.pkg.tar*' \
-    && sudo -u builder bash -c 'set -e; cd /work/aur \
+        && cd openrc && makepkg -s --ignorearch --noconfirm \
+        && sudo pacman -U --noconfirm ./*.pkg.tar*' \
+    && chroot /work/alarmroot sudo -u builder bash -c 'set -e; cd /tmp/aur \
         && git clone --depth 1 https://aur.archlinux.org/openrc-arch-services-git.git \
         && cd openrc-arch-services-git \
         && git fetch --depth 1 origin a6ab4db0d4401886f713f89ab4d3ee8d24b04cd8 \
         && git checkout a6ab4db0d4401886f713f89ab4d3ee8d24b04cd8 \
         && makepkg -s --noconfirm \
-        && sudo pacman -U --root /work/rootfs --noconfirm ./*.pkg.tar*'
+        && sudo pacman -U --noconfirm ./*.pkg.tar*'
+
+# Drop build-time weight, then promote the tree to /work/rootfs (the path
+# build-rootfs-arch.sh and mksquashfs expect — unchanged below).
+# linux-aarch64 is the distro kernel, not ours — remove only if present.
+RUN chroot /work/alarmroot pacman -Rns --noconfirm base-devel git \
+    && if chroot /work/alarmroot pacman -Qq linux-aarch64 >/dev/null 2>&1; then \
+           chroot /work/alarmroot pacman -Rns --noconfirm linux-aarch64; \
+       fi \
+    && chroot /work/alarmroot userdel -r builder \
+    && rm -rf /work/alarmroot/tmp/aur /work/alarmroot/etc/sudoers.d/builder \
+    && mv /work/alarmroot /work/rootfs
 
 # Hard assertion: the rootfs must contain openrc-run before packing.
 # Without it the guest cannot boot (init-podroid execs /sbin/init).
