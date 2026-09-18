@@ -34,15 +34,17 @@ Commands:
   all           Build everything (Kernel, Initramfs, Rootfs, QEMU, APK)
   kernel        Build custom kernel only (podroid_kernel.config + Linux source)
   initramfs     Build custom kernel + Alpine VM initramfs (vmlinuz + initrd)
-  rootfs        Build Alpine rootfs squashfs (alpine-rootfs.squashfs)
+  rootfs        Build rootfs squashfs (--distro=alpine|arch, default: alpine)
   qemu          Build QEMU + podroid-bridge + podroid-launcher
-  apk           Build the Android APK (also builds libtermux.so via Gradle NDK)
-  deploy        Build APK, uninstall old version, and install to device
+  apk           Build the Android APKs (alpine + arch flavors via Gradle NDK)
+  deploy        Build APKs, uninstall old version, and install to device
   test          Perform full build, install, and automated boot validation
   clean         Remove build artifacts and temporary containers
 
 Options:
   --fast        Skip QEMU native builds if binaries already exist
+  --distro=alpine|arch
+                Select rootfs distro for rootfs/test/deploy (default: alpine)
   --help        Show this help message
 
 EOF
@@ -121,15 +123,30 @@ build_initramfs() {
 }
 
 build_rootfs() {
-    log "Building Alpine rootfs squashfs..."
+    local distro="${DISTRO:-alpine}"
     local sysver
     sysver=$(grep -E '^[[:space:]]*versionCode[[:space:]]*=' "${SCRIPT_DIR}/app/build.gradle.kts" | grep -oE '[0-9]+' | head -1)
-    docker build -f "${SCRIPT_DIR}/build-rootfs/Dockerfile.rootfs" \
-        -t podroid-rootfs:latest \
-        --build-arg "SYSTEM_VERSION=${sysver:-0}" \
-        --output type=local,dest="${ASSETS}" \
-        "${SCRIPT_DIR}/build-rootfs/"
-    success "Built ${ASSETS}/alpine-rootfs.squashfs ($(du -h "${ASSETS}/alpine-rootfs.squashfs" | cut -f1)), system-version ${sysver:-0}"
+    if [ "$distro" = "arch" ]; then
+        log "Building Arch rootfs squashfs..."
+        docker build -f "${SCRIPT_DIR}/build-rootfs/Dockerfile.rootfs.arch" \
+            -t podroid-rootfs-arch:latest \
+            --build-arg "SYSTEM_VERSION=${sysver:-0}" \
+            --output type=local,dest="${ASSETS}" \
+            "${SCRIPT_DIR}/build-rootfs/"
+        mkdir -p "${SCRIPT_DIR}/app/src/arch/assets"
+        cp -f "${ASSETS}/arch-rootfs.squashfs" "${SCRIPT_DIR}/app/src/arch/assets/arch-rootfs.squashfs"
+        success "Built ${ASSETS}/arch-rootfs.squashfs ($(du -h "${ASSETS}/arch-rootfs.squashfs" | cut -f1)), system-version ${sysver:-0}"
+    else
+        log "Building Alpine rootfs squashfs..."
+        docker build -f "${SCRIPT_DIR}/build-rootfs/Dockerfile.rootfs" \
+            -t podroid-rootfs:latest \
+            --build-arg "SYSTEM_VERSION=${sysver:-0}" \
+            --output type=local,dest="${ASSETS}" \
+            "${SCRIPT_DIR}/build-rootfs/"
+        mkdir -p "${SCRIPT_DIR}/app/src/alpine/assets"
+        cp -f "${ASSETS}/alpine-rootfs.squashfs" "${SCRIPT_DIR}/app/src/alpine/assets/alpine-rootfs.squashfs"
+        success "Built ${ASSETS}/alpine-rootfs.squashfs ($(du -h "${ASSETS}/alpine-rootfs.squashfs" | cut -f1)), system-version ${sysver:-0}"
+    fi
 }
 
 build_qemu() {
@@ -158,20 +175,41 @@ build_qemu() {
 }
 
 build_apk() {
-    log "Building APK via Gradle..."
-    ./gradlew assembleDebug
-    success "APK built: app/build/outputs/apk/debug/app-debug.apk"
+    log "Building APKs via Gradle (alpine + arch flavors)..."
+    # Stage flavor squashfs files if a rootfs build already populated main assets.
+    if [ -f "${ASSETS}/alpine-rootfs.squashfs" ]; then
+        mkdir -p "${SCRIPT_DIR}/app/src/alpine/assets"
+        cp -f "${ASSETS}/alpine-rootfs.squashfs" "${SCRIPT_DIR}/app/src/alpine/assets/" 2>/dev/null || true
+    fi
+    if [ -f "${ASSETS}/arch-rootfs.squashfs" ]; then
+        mkdir -p "${SCRIPT_DIR}/app/src/arch/assets"
+        cp -f "${ASSETS}/arch-rootfs.squashfs" "${SCRIPT_DIR}/app/src/arch/assets/" 2>/dev/null || true
+    fi
+    ./gradlew assembleAlpineDebug assembleArchDebug
+    success "APKs built: app/build/outputs/apk/alpine/debug/ + arch/debug/"
 }
 
 deploy_apk() {
-    log "Deploying to device..."
-    adb uninstall com.excp.podroid.debug || warn "Uninstall failed (likely not installed)."
-    adb install -r app/build/outputs/apk/debug/app-debug.apk
+    local distro="${DISTRO:-alpine}"
+    local apk
+    if [ "$distro" = "arch" ]; then
+        apk="app/build/outputs/apk/arch/debug/app-arch-debug.apk"
+    else
+        apk="app/build/outputs/apk/alpine/debug/app-alpine-debug.apk"
+    fi
+    # Fall back to the legacy non-flavor path if Gradle output layout differs.
+    if [ ! -f "$apk" ] && [ -f "app/build/outputs/apk/debug/app-debug.apk" ]; then
+        apk="app/build/outputs/apk/debug/app-debug.apk"
+    fi
+    log "Deploying to device ($distro: $apk)..."
+    adb uninstall "com.excp.podroid.${distro}.debug" || warn "Uninstall failed (likely not installed)."
+    adb install -r "$apk"
     success "Deployed and ready."
 }
 
 run_boot_test() {
-    local pkg="com.excp.podroid.debug"
+    local distro="${DISTRO:-alpine}"
+    local pkg="com.excp.podroid.${distro}.debug"
     local activity="com.excp.podroid.MainActivity"
     local timeout=60
     
@@ -221,7 +259,7 @@ run_boot_test() {
     console=$(adb shell run-as "$pkg" cat files/console.log 2>/dev/null || echo "")
     
     local errors=0
-    local checks=("Podroid - Alpine Linux" "IP:" "Ready!" "Loading kernel modules")
+    local checks=("IP:" "Ready!" "Loading kernel modules")
     for check in "${checks[@]}"; do
         if echo "$console" | grep -q "$check"; then
             success "Check passed: $check"
@@ -243,7 +281,15 @@ run_boot_test() {
 [ $# -eq 0 ] && { show_help; exit 1; }
 
 FAST=false
-for arg in "$@"; do [ "$arg" == "--fast" ] && FAST=true; done
+DISTRO=alpine
+for arg in "$@"; do
+    [ "$arg" == "--fast" ] && FAST=true
+    case "$arg" in
+        --distro=alpine) DISTRO=alpine ;;
+        --distro=arch) DISTRO=arch ;;
+        --distro=*) error "Unknown --distro value: $arg (expected alpine|arch)" ;;
+    esac
+done
 
 case "$1" in
     kernel)    build_kernel ;;
@@ -262,7 +308,7 @@ case "$1" in
     clean)
         log "Cleaning up..."
         ./gradlew clean
-        docker rmi podroid-builder podroid-qemu-builder podroid-rootfs:latest 2>/dev/null || true
+        docker rmi podroid-builder podroid-qemu-builder podroid-rootfs:latest podroid-rootfs-arch:latest 2>/dev/null || true
         success "Cleaned."
         ;;
     *)

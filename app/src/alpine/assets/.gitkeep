@@ -1,0 +1,4 @@
+# Alpine flavor assets — populated by CI/local build:
+#   ./build-all.sh rootfs --distro=alpine
+# copies app/src/main/assets/alpine-rootfs.squashfs here.
+# Gitignored; placeholder keeps the sourceSet dir present.

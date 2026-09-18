@@ -1,0 +1,4 @@
+# Arch flavor assets — populated by CI/local build:
+#   ./build-all.sh rootfs --distro=arch
+# copies app/src/main/assets/arch-rootfs.squashfs here.
+# Gitignored; placeholder keeps the sourceSet dir present.

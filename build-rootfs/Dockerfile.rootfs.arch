@@ -1,0 +1,128 @@
+# build-rootfs/Dockerfile.rootfs.arch — Arch Linux rootfs (aarch64) for Podroid.
+#
+# Mirrors Dockerfile.rootfs, but bootstraps Arch via pacstrap instead of
+# Alpine minirootfs + apk. Init stays OpenRC (same podroid-* services,
+# same inittab/rc.conf, same runlevel-symlink approach — no chroot
+# rc-update since the builder host is x86_64).
+#
+# dm-crypt userspace (cryptsetup, lvm2, device-mapper/dmsetup) is installed
+# here; the kernel already ships CONFIG_DM_CRYPT=y, CONFIG_CRYPTO_AES=y,
+# CONFIG_CRYPTO_XTS=y, CONFIG_CRYPTO_ARGON2=y, CONFIG_CRYPTO_SHA256=y,
+# so stock LUKS2 works out of the box.
+#
+# OpenRC + elogind-openrc come from the AUR (not in Arch official repos),
+# built with makepkg as a non-root user inside the arch-builder stage.
+
+# ── Stage 1: cross-compile podroid helpers (musl-static aarch64) ──────────
+# Identical to Dockerfile.rootfs — reused unchanged so the guest<->Android
+# bridge (podroid-hostd multi-call: notify/forward/open/power/headless/server),
+# the vsock agent, and the overlay normalizer behave the same on both distros.
+FROM --platform=linux/arm64 alpine:3.24 AS vsock-builder
+RUN apk add --no-cache musl-dev gcc make linux-headers
+WORKDIR /work
+COPY vsock-agent /work/vsock-agent
+RUN cd /work/vsock-agent && make CC=gcc
+COPY host-bridge /work/host-bridge
+RUN cd /work/host-bridge && make CC=gcc
+COPY overlay-normalize /work/overlay-normalize
+RUN cd /work/overlay-normalize && make CC=gcc
+
+# ── Stage 2: bootstrap + customize the Arch rootfs ────────────────────────
+FROM --platform=linux/arm64 archlinux:latest AS arch-builder
+
+ARG SYSTEM_VERSION=0
+ENV SYSTEM_VERSION=${SYSTEM_VERSION}
+
+RUN pacman -Syu --noconfirm \
+    && pacman -S --noconfirm --needed \
+        arch-install-scripts \
+        squashfs-tools \
+        openssl \
+        libcap \
+        base-devel \
+        git \
+        sudo
+
+WORKDIR /work
+
+# pacstrap the base system + Podroid guest packages into /work/rootfs.
+# NOTE: openrc and elogind-openrc are AUR-only; everything else is official.
+RUN mkdir -p /work/rootfs \
+    && pacstrap -c /work/rootfs \
+        base \
+        filesystem \
+        bash \
+        busybox \
+        shadow \
+        podman \
+        crun \
+        fuse-overlayfs \
+        slirp4netns \
+        netavark \
+        aardvark-dns \
+        docker \
+        docker-compose \
+        lxc \
+        dnsmasq \
+        openssh \
+        iptables \
+        nftables \
+        iproute2 \
+        bridge-utils \
+        curl \
+        ca-certificates \
+        tigervnc \
+        pulseaudio \
+        cryptsetup \
+        lvm2 \
+        device-mapper \
+        sudo \
+        gzip \
+        xz \
+        ttf-dejavu
+
+# Build + install AUR OpenRC stack (openrc, elogind-openrc) as non-root.
+# Fail-fast: any AUR failure aborts the build (CI goes red) rather than
+# shipping a squashfs without a working init system.
+RUN set -e \
+    && useradd -m builder \
+    && echo "builder ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/builder \
+    && chmod 0440 /etc/sudoers.d/builder \
+    && mkdir -p /work/aur \
+    && chown builder:builder /work/aur \
+    && sudo -u builder bash -c 'set -e; cd /work/aur \
+        && git clone --depth 1 https://aur.archlinux.org/openrc.git \
+        && cd openrc && makepkg -s --noconfirm \
+        && sudo pacman -U --root /work/rootfs --noconfirm ./*.pkg.tar*' \
+    && sudo -u builder bash -c 'set -e; cd /work/aur \
+        && git clone --depth 1 https://aur.archlinux.org/elogind-openrc.git \
+        && cd elogind-openrc && makepkg -s --noconfirm \
+        && sudo pacman -U --root /work/rootfs --noconfirm ./*.pkg.tar*' \
+    && sudo -u builder bash -c 'set -e; cd /work/aur \
+        && git clone --depth 1 https://aur.archlinux.org/openrc-arch-services-git.git \
+        && cd openrc-arch-services-git \
+        && git fetch --depth 1 origin a6ab4db0d4401886f713f89ab4d3ee8d24b04cd8 \
+        && git checkout a6ab4db0d4401886f713f89ab4d3ee8d24b04cd8 \
+        && makepkg -s --noconfirm \
+        && sudo pacman -U --root /work/rootfs --noconfirm ./*.pkg.tar*'
+
+# Hard assertion: the rootfs must contain openrc-run before packing.
+# Without it the guest cannot boot (init-podroid execs /sbin/init).
+RUN test -x /work/rootfs/usr/bin/openrc-run || test -x /work/rootfs/sbin/openrc-run || { echo "ERROR: openrc-run missing from rootfs"; exit 1; }
+
+# Pull in the vsock-agent / host-bridge binaries built in stage 1.
+COPY --from=vsock-builder /work/vsock-agent/podroid-vsock-agent /work/rootfs/usr/local/bin/podroid-vsock-agent
+COPY --from=vsock-builder /work/host-bridge/podroid-hostd /work/rootfs/usr/local/bin/podroid-hostd
+COPY --from=vsock-builder /work/overlay-normalize/podroid-overlay-normalize /work/rootfs/usr/local/bin/podroid-overlay-normalize
+
+COPY files /work/files
+COPY build-rootfs-arch.sh /work/build-rootfs-arch.sh
+RUN chmod +x /work/build-rootfs-arch.sh && /work/build-rootfs-arch.sh
+
+RUN mksquashfs /work/rootfs /work/arch-rootfs.squashfs \
+    -comp zstd -Xcompression-level 19 -all-root -noappend
+# (No -no-xattrs: rootless podman's newuidmap/newgidmap need their
+# file capabilities preserved; they're stored as security.capability xattr.)
+
+FROM scratch AS export
+COPY --from=arch-builder /work/arch-rootfs.squashfs /arch-rootfs.squashfs

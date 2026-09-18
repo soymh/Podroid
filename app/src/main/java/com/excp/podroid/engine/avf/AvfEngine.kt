@@ -969,7 +969,7 @@ class AvfEngine @Inject constructor(
             require(it.exists()) { "initrd missing at ${it.absolutePath}" }
         }
         val storage = ensureStorageImage(config.storageSizeGb)
-        val squashfs = File(context.filesDir, "alpine-rootfs.squashfs").also {
+        val squashfs = File(context.filesDir, com.excp.podroid.BuildConfig.ROOTFS_ASSET).also {
             require(it.exists()) { "rootfs missing at ${it.absolutePath}" }
         }
 

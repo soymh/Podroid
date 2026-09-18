@@ -28,12 +28,38 @@ android {
         versionCode = 32
         versionName = "1.2.8"
         buildConfigField("String", "QEMU_VERSION", "\"$podroidQemuVersion\"")
+        buildConfigField("String", "ROOTFS_ASSET", "\"alpine-rootfs.squashfs\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // Only build for arm64-v8a — we target AArch64 Android devices exclusively
         ndk {
             abiFilters += "arm64-v8a"
+        }
+    }
+
+    flavorDimensions += "distro"
+    productFlavors {
+        create("alpine") {
+            dimension = "distro"
+            applicationIdSuffix = ".alpine"
+            versionNameSuffix = "-alpine"
+            buildConfigField("String", "ROOTFS_ASSET", "\"alpine-rootfs.squashfs\"")
+        }
+        create("arch") {
+            dimension = "distro"
+            applicationIdSuffix = ".arch"
+            versionNameSuffix = "-arch"
+            buildConfigField("String", "ROOTFS_ASSET", "\"arch-rootfs.squashfs\"")
+        }
+    }
+
+    sourceSets {
+        getByName("alpine") {
+            assets.srcDir("src/alpine/assets")
+        }
+        getByName("arch") {
+            assets.srcDir("src/arch/assets")
         }
     }
 

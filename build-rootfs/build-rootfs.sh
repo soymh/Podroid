@@ -41,6 +41,7 @@ apk -X "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_BRANCH}/main" \
     slirp4netns \
     aardvark-dns netavark \
     libcap-utils \
+    cryptsetup lvm2 device-mapper \
     doas sudo \
     gcompat \
     gzip \

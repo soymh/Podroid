@@ -37,7 +37,7 @@ jobs:
           path: app/src/main/assets/initrd.img
           retention-days: 1
 
-  build-rootfs:
+  build-rootfs-alpine:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -50,14 +50,37 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build rootfs
-        run: ./build-all.sh rootfs
+      - name: Build Alpine rootfs
+        run: ./build-all.sh rootfs --distro=alpine
 
-      - name: Upload rootfs
+      - name: Upload Alpine rootfs
         uses: actions/upload-artifact@v4
         with:
-          name: rootfs
+          name: rootfs-alpine
           path: app/src/main/assets/alpine-rootfs.squashfs
+          retention-days: 1
+
+  build-rootfs-arch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU for arm64
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Arch rootfs
+        run: ./build-all.sh rootfs --distro=arch
+
+      - name: Upload Arch rootfs
+        uses: actions/upload-artifact@v4
+        with:
+          name: rootfs-arch
+          path: app/src/main/assets/arch-rootfs.squashfs
           retention-days: 1
 
   build-qemu:
@@ -92,7 +115,7 @@ jobs:
 
   build-apk:
     runs-on: ubuntu-latest
-    needs: [build-kernel, build-rootfs, build-qemu]
+    needs: [build-kernel, build-rootfs-alpine, build-rootfs-arch, build-qemu]
     steps:
       - uses: actions/checkout@v4
 
@@ -108,11 +131,24 @@ jobs:
           name: initrd
           path: app/src/main/assets/
 
-      - name: Download rootfs
+      - name: Download Alpine rootfs
         uses: actions/download-artifact@v4
         with:
-          name: rootfs
+          name: rootfs-alpine
           path: app/src/main/assets/
+
+      - name: Download Arch rootfs
+        uses: actions/download-artifact@v4
+        with:
+          name: rootfs-arch
+          path: app/src/main/assets/
+
+      - name: Stage flavor rootfs assets
+        run: |
+          mkdir -p app/src/alpine/assets app/src/arch/assets
+          cp -f app/src/main/assets/alpine-rootfs.squashfs app/src/alpine/assets/alpine-rootfs.squashfs
+          cp -f app/src/main/assets/arch-rootfs.squashfs app/src/arch/assets/arch-rootfs.squashfs
+          ls -la app/src/alpine/assets/ app/src/arch/assets/
 
       - name: Download jniLibs
         uses: actions/download-artifact@v4
@@ -131,7 +167,8 @@ jobs:
           echo "=== Assets ==="
           ls -la app/src/main/assets/vmlinuz-virt
           ls -la app/src/main/assets/initrd.img
-          ls -la app/src/main/assets/alpine-rootfs.squashfs
+          ls -la app/src/alpine/assets/alpine-rootfs.squashfs
+          ls -la app/src/arch/assets/arch-rootfs.squashfs
           echo "=== jniLibs ==="
           ls -la app/src/main/jniLibs/arm64-v8a/
 
@@ -141,19 +178,26 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Build debug APK
-        run: ./gradlew assembleDebug
+      - name: Build debug APKs
+        run: ./gradlew assembleAlpineDebug assembleArchDebug
 
-      - name: Upload APK
+      - name: Upload Alpine debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: podroid-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: podroid-debug-alpine
+          path: app/build/outputs/apk/alpine/debug/app-alpine-debug.apk
+          retention-days: 7
+
+      - name: Upload Arch debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: podroid-debug-arch
+          path: app/build/outputs/apk/arch/debug/app-arch-debug.apk
           retention-days: 7
 
   release:
     runs-on: ubuntu-latest
-    needs: [build-kernel, build-rootfs, build-qemu, build-apk]
+    needs: [build-kernel, build-rootfs-alpine, build-rootfs-arch, build-qemu, build-apk]
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write  # required to create the GitHub Release
@@ -172,11 +216,23 @@ jobs:
           name: initrd
           path: app/src/main/assets/
 
-      - name: Download rootfs
+      - name: Download Alpine rootfs
         uses: actions/download-artifact@v4
         with:
-          name: rootfs
+          name: rootfs-alpine
           path: app/src/main/assets/
+
+      - name: Download Arch rootfs
+        uses: actions/download-artifact@v4
+        with:
+          name: rootfs-arch
+          path: app/src/main/assets/
+
+      - name: Stage flavor rootfs assets
+        run: |
+          mkdir -p app/src/alpine/assets app/src/arch/assets
+          cp -f app/src/main/assets/alpine-rootfs.squashfs app/src/alpine/assets/alpine-rootfs.squashfs
+          cp -f app/src/main/assets/arch-rootfs.squashfs app/src/arch/assets/arch-rootfs.squashfs
 
       - name: Download jniLibs
         uses: actions/download-artifact@v4
@@ -205,18 +261,20 @@ jobs:
         id: version
         run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
 
-      - name: Build release APK
-        run: ./gradlew assembleRelease
+      - name: Build release APKs
+        run: ./gradlew assembleAlpineRelease assembleArchRelease
         env:
           PODROID_RELEASE_STORE_FILE: podroid-release.jks
           PODROID_RELEASE_STORE_PASSWORD: ${{ secrets.PODROID_RELEASE_STORE_PASSWORD }}
           PODROID_RELEASE_KEY_ALIAS: ${{ secrets.PODROID_RELEASE_KEY_ALIAS }}
           PODROID_RELEASE_KEY_PASSWORD: ${{ secrets.PODROID_RELEASE_KEY_PASSWORD }}
 
-      - name: Rename APK
+      - name: Rename APKs
         run: |
-          mv app/build/outputs/apk/release/app-release.apk \
-             app/build/outputs/apk/release/podroid-${{ steps.version.outputs.VERSION }}.apk
+          mv app/build/outputs/apk/alpine/release/app-alpine-release.apk \
+             app/build/outputs/apk/release/podroid-${{ steps.version.outputs.VERSION }}-alpine.apk
+          mv app/build/outputs/apk/arch/release/app-arch-release.apk \
+             app/build/outputs/apk/release/podroid-${{ steps.version.outputs.VERSION }}-arch.apk
           ls -la app/build/outputs/apk/release/
 
       - name: Create GitHub Release
@@ -225,6 +283,7 @@ jobs:
           name: "Podroid v${{ steps.version.outputs.VERSION }}"
           generate_release_notes: true
           files: |
-            app/build/outputs/apk/release/podroid-${{ steps.version.outputs.VERSION }}.apk
+            app/build/outputs/apk/release/podroid-${{ steps.version.outputs.VERSION }}-alpine.apk
+            app/build/outputs/apk/release/podroid-${{ steps.version.outputs.VERSION }}-arch.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
