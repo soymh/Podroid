@@ -620,7 +620,9 @@ class VmControlReceiver : BroadcastReceiver() {
 
     companion object {
         private const val TAG = "VmControlReceiver"
-        const val ACTION_START_VM = "com.excp.podroid.action.START_VM"
-        const val ACTION_STOP_VM  = "com.excp.podroid.action.STOP_VM"
+        // Flavor-namespaced via manifestPlaceholders (actionPrefix) so two
+        // installed flavors don't both answer the same automation intents.
+        val ACTION_START_VM = "${com.excp.podroid.BuildConfig.ACTION_PREFIX}.START_VM"
+        val ACTION_STOP_VM = "${com.excp.podroid.BuildConfig.ACTION_PREFIX}.STOP_VM"
     }
 }

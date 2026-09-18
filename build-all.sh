@@ -216,7 +216,9 @@ deploy_apk() {
 
 run_boot_test() {
     local distro="${DISTRO:-alpine}"
-    local pkg="com.excp.podroid.${distro}.debug"
+    # Alpine keeps the base applicationId (no flavor suffix); arch appends.
+    local pkg="com.excp.podroid.debug"
+    [ "$distro" = "arch" ] && pkg="com.excp.podroid.arch.debug"
     local activity="com.excp.podroid.MainActivity"
     local timeout=60
     

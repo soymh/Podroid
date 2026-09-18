@@ -99,7 +99,7 @@
                  Activity launch is always allowed to start a foreground
                  service, unlike a cold background receiver. -->
             <intent-filter>
-                <action android:name="com.excp.podroid.action.START_VM" />
+                <action android:name="${actionPrefix}.START_VM" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
@@ -137,8 +137,8 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
-                <action android:name="com.excp.podroid.action.START_VM" />
-                <action android:name="com.excp.podroid.action.STOP_VM" />
+                <action android:name="${actionPrefix}.START_VM" />
+                <action android:name="${actionPrefix}.STOP_VM" />
             </intent-filter>
         </receiver>
 

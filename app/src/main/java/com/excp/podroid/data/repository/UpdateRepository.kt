@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import dagger.hilt.android.qualifiers.ApplicationContext
+import com.excp.podroid.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
@@ -142,7 +143,10 @@ class UpdateRepository @Inject constructor(
                 return@withContext null
             }
 
-            connection = URL("https://api.github.com/repos/ExTV/Podroid/releases/latest")
+            // Per-flavor update repo (BuildConfig.UPDATE_REPO): the fork's
+            // releases carry this flavor's APK; upstream's would not install
+            // (signature mismatch) or would offer the wrong distro image.
+            connection = URL("https://api.github.com/repos/${BuildConfig.UPDATE_REPO}/releases/latest")
                 .openConnection() as java.net.HttpURLConnection
             connection.connectTimeout = 5000
             connection.readTimeout = 5000

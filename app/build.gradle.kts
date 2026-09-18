@@ -40,17 +40,24 @@ android {
 
     flavorDimensions += "distro"
     productFlavors {
+        // alpine keeps the base applicationId: it is the continuation app,
+        // so existing installs upgrade in place with data intact.
         create("alpine") {
             dimension = "distro"
-            applicationIdSuffix = ".alpine"
             versionNameSuffix = "-alpine"
             buildConfigField("String", "ROOTFS_ASSET", "\"alpine-rootfs.squashfs\"")
+            buildConfigField("String", "UPDATE_REPO", "\"soymh/Podroid\"")
+            buildConfigField("String", "ACTION_PREFIX", "\"com.excp.podroid.action\"")
+            manifestPlaceholders["actionPrefix"] = "com.excp.podroid.action"
         }
         create("arch") {
             dimension = "distro"
             applicationIdSuffix = ".arch"
             versionNameSuffix = "-arch"
             buildConfigField("String", "ROOTFS_ASSET", "\"arch-rootfs.squashfs\"")
+            buildConfigField("String", "UPDATE_REPO", "\"soymh/Podroid\"")
+            buildConfigField("String", "ACTION_PREFIX", "\"com.excp.podroid.arch.action\"")
+            manifestPlaceholders["actionPrefix"] = "com.excp.podroid.arch.action"
         }
     }
 
