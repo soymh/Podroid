@@ -25,8 +25,8 @@ android {
         applicationId = "com.excp.podroid"
         minSdk = 26
         targetSdk = 36
-        versionCode = 34
-        versionName = "1.3.1"
+        versionCode = 35
+        versionName = "1.3.2"
         buildConfigField("String", "QEMU_VERSION", "\"$podroidQemuVersion\"")
         buildConfigField("String", "ROOTFS_ASSET", "\"alpine-rootfs.squashfs\"")
 
