@@ -82,13 +82,19 @@ EOF
 cat > "$OERC/init.d/sshd" <<'EOF'
 #!/sbin/openrc-run
 description="OpenSSH server"
+# NOTE: no -D flag: like the reference openrc-arch-services script, let sshd
+# daemonize itself so it writes /run/sshd.pid (with -D the pidfile is never
+# written and OpenRC can't track the service).
 command="/usr/bin/sshd"
-command_args="-D"
 pidfile="/run/sshd.pid"
 depend() {
     need podroid-network
 }
 start_pre() {
+    # Privilege separation dir: normally created by systemd-tmpfiles, which
+    # doesn't exist under OpenRC — without it sshd refuses to start.
+    mkdir -p /run/sshd
+    chmod 0755 /run/sshd
     [ -f /etc/ssh/ssh_host_ed25519_key ] || ssh-keygen -A
 }
 EOF
@@ -177,6 +183,10 @@ printf '%s\n' "${SYSTEM_VERSION:-0}" > "$ROOTFS/etc/podroid/system-version"
 chmod 0644 "$ROOTFS/etc/podroid/system-version"
 cp /work/files/etc/inittab "$ROOTFS/etc/inittab"
 cp /work/files/etc/rc.conf "$OERC/rc.conf"
+# SSH auth drop-in (Arch default rejects root+password; see the file).
+mkdir -p "$ROOTFS/etc/ssh/sshd_config.d"
+cp /work/files/etc/ssh/sshd_config.d/podroid.conf "$ROOTFS/etc/ssh/sshd_config.d/podroid.conf"
+chmod 0644 "$ROOTFS/etc/ssh/sshd_config.d/podroid.conf"
 
 # /etc/profile.d helpers (same as Alpine).
 mkdir -p "$ROOTFS/etc/profile.d"
