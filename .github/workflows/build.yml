@@ -57,7 +57,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: rootfs-alpine
-          path: app/src/main/assets/alpine-rootfs.squashfs
+          path: app/src/alpine/assets/alpine-rootfs.squashfs
           retention-days: 1
 
   build-rootfs-arch:
@@ -80,7 +80,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: rootfs-arch
-          path: app/src/main/assets/arch-rootfs.squashfs
+          path: app/src/arch/assets/arch-rootfs.squashfs
           retention-days: 1
 
   build-qemu:
