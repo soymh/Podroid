@@ -135,7 +135,10 @@ build_rootfs() {
             "${SCRIPT_DIR}/build-rootfs/"
         mkdir -p "${SCRIPT_DIR}/app/src/arch/assets"
         cp -f "${ASSETS}/arch-rootfs.squashfs" "${SCRIPT_DIR}/app/src/arch/assets/arch-rootfs.squashfs"
-        success "Built ${ASSETS}/arch-rootfs.squashfs ($(du -h "${ASSETS}/arch-rootfs.squashfs" | cut -f1)), system-version ${sysver:-0}"
+        # Purge from main assets: main ships in EVERY flavor, so leaving the
+        # squashfs here would bundle it into the alpine APK too (GBs wasted).
+        rm -f "${ASSETS}/arch-rootfs.squashfs"
+        success "Built ${SCRIPT_DIR}/app/src/arch/assets/arch-rootfs.squashfs ($(du -h "${SCRIPT_DIR}/app/src/arch/assets/arch-rootfs.squashfs" | cut -f1)), system-version ${sysver:-0}"
     else
         log "Building Alpine rootfs squashfs..."
         docker build -f "${SCRIPT_DIR}/build-rootfs/Dockerfile.rootfs" \
@@ -145,7 +148,10 @@ build_rootfs() {
             "${SCRIPT_DIR}/build-rootfs/"
         mkdir -p "${SCRIPT_DIR}/app/src/alpine/assets"
         cp -f "${ASSETS}/alpine-rootfs.squashfs" "${SCRIPT_DIR}/app/src/alpine/assets/alpine-rootfs.squashfs"
-        success "Built ${ASSETS}/alpine-rootfs.squashfs ($(du -h "${ASSETS}/alpine-rootfs.squashfs" | cut -f1)), system-version ${sysver:-0}"
+        # Purge from main assets (see arch branch above): each flavor must
+        # carry exactly its own rootfs.
+        rm -f "${ASSETS}/alpine-rootfs.squashfs"
+        success "Built ${SCRIPT_DIR}/app/src/alpine/assets/alpine-rootfs.squashfs ($(du -h "${SCRIPT_DIR}/app/src/alpine/assets/alpine-rootfs.squashfs" | cut -f1)), system-version ${sysver:-0}"
     fi
 }
 
@@ -185,6 +191,9 @@ build_apk() {
         mkdir -p "${SCRIPT_DIR}/app/src/arch/assets"
         cp -f "${ASSETS}/arch-rootfs.squashfs" "${SCRIPT_DIR}/app/src/arch/assets/" 2>/dev/null || true
     fi
+    # Main assets merge into every flavor: purge staged squashfs files so each
+    # APK bundles exactly its own rootfs (a 1.6GB stowaway doubles APK size).
+    rm -f "${ASSETS}/alpine-rootfs.squashfs" "${ASSETS}/arch-rootfs.squashfs"
     ./gradlew assembleAlpineDebug assembleArchDebug
     success "APKs built: app/build/outputs/apk/alpine/debug/ + arch/debug/"
 }

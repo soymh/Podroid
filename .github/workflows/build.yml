@@ -148,6 +148,9 @@ jobs:
           mkdir -p app/src/alpine/assets app/src/arch/assets
           cp -f app/src/main/assets/alpine-rootfs.squashfs app/src/alpine/assets/alpine-rootfs.squashfs
           cp -f app/src/main/assets/arch-rootfs.squashfs app/src/arch/assets/arch-rootfs.squashfs
+          # Purge from main assets (they merge into every flavor — leaving the
+          # squashfs files here bundles both images into both APKs).
+          rm -f app/src/main/assets/alpine-rootfs.squashfs app/src/main/assets/arch-rootfs.squashfs
           ls -la app/src/alpine/assets/ app/src/arch/assets/
 
       - name: Download jniLibs
@@ -233,6 +236,9 @@ jobs:
           mkdir -p app/src/alpine/assets app/src/arch/assets
           cp -f app/src/main/assets/alpine-rootfs.squashfs app/src/alpine/assets/alpine-rootfs.squashfs
           cp -f app/src/main/assets/arch-rootfs.squashfs app/src/arch/assets/arch-rootfs.squashfs
+          # Purge from main assets (they merge into every flavor — leaving the
+          # squashfs files here bundles both images into both APKs).
+          rm -f app/src/main/assets/alpine-rootfs.squashfs app/src/main/assets/arch-rootfs.squashfs
 
       - name: Download jniLibs
         uses: actions/download-artifact@v4

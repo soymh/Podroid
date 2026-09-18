@@ -132,8 +132,12 @@ RUN useradd -m builder \
 
 # Drop build-time weight: dev toolchain, package cache, temp dirs, helper
 # account. linux-aarch64 is the distro kernel, not ours — remove only if present.
+# /var/lib/pacman/sync/* (repo DBs) are dropped too: re-fetchable in the guest
+# via `pacman -Sy`, and they cost tens of MB in the image. The local DB stays
+# (pacman -Q/-R need it).
 RUN pacman -Rns --noconfirm base-devel git \
     && pacman -Scc --noconfirm \
+    && rm -rf /var/lib/pacman/sync/* \
     && if pacman -Qq linux-aarch64 >/dev/null 2>&1; then \
            pacman -Rns --noconfirm linux-aarch64; \
        fi \
@@ -172,6 +176,11 @@ RUN mksquashfs /work/rootfs /work/arch-rootfs.squashfs \
     -comp zstd -Xcompression-level 19 -all-root -noappend
 # (No -no-xattrs: rootless podman's newuidmap/newgidmap need their
 # file capabilities preserved; they're stored as security.capability xattr.)
+
+# Size audit (visible in CI log): totals + top space hogs guide trimming rounds.
+RUN ls -lh /work/arch-rootfs.squashfs \
+    && du -sh /work/rootfs \
+    && du -x -d2 /work/rootfs 2>/dev/null | sort -rh | head -30
 
 FROM scratch AS export
 COPY --from=arch-builder /work/arch-rootfs.squashfs /arch-rootfs.squashfs
