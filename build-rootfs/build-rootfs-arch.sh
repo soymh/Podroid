@@ -157,13 +157,21 @@ ln -sf podroid-hostd "$ROOTFS/usr/local/bin/podroid-power"
 ln -sf podroid-hostd "$ROOTFS/usr/local/bin/podroid-headless"
 ln -sf podroid-hostd "$ROOTFS/usr/local/bin/podroid-server"
 chmod +x "$ROOTFS/usr/local/bin/podroid-"*
-mkdir -p "$OERC/conf.d"
-cp /work/files/etc/conf.d/podroid "$OERC/conf.d/"
 mkdir -p "$ROOTFS/etc/podroid"
 cp /work/files/etc/podroid/forwards.conf "$ROOTFS/etc/podroid/forwards.conf"
 chmod 0644 "$ROOTFS/etc/podroid/forwards.conf"
 mkdir -p "$ROOTFS/etc/podroid/migrations"
 cp /work/files/etc/podroid/migrations/README "$ROOTFS/etc/podroid/migrations/README"
+# Install every migration script (mirrors Alpine's build-rootfs.sh loop, which
+# upstream's refactor introduced alongside migrations/33.sh): a new migration
+# needs no build-script edit. NOTE: no conf.d handling here — upstream removed
+# files/etc/conf.d/podroid as unused (nothing reads conf.d), so there is
+# nothing to copy on either distro.
+for f in /work/files/etc/podroid/migrations/*.sh; do
+    [ -f "$f" ] || continue
+    cp "$f" "$ROOTFS/etc/podroid/migrations/"
+    chmod 0755 "$ROOTFS/etc/podroid/migrations/$(basename "$f")"
+done
 # System-version stamp: the migration anchor (same as Alpine).
 printf '%s\n' "${SYSTEM_VERSION:-0}" > "$ROOTFS/etc/podroid/system-version"
 chmod 0644 "$ROOTFS/etc/podroid/system-version"
