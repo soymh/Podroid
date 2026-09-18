@@ -277,6 +277,7 @@ jobs:
 
       - name: Rename APKs
         run: |
+          mkdir -p app/build/outputs/apk/release/
           mv app/build/outputs/apk/alpine/release/app-alpine-release.apk \
              app/build/outputs/apk/release/podroid-${{ steps.version.outputs.VERSION }}-alpine.apk
           mv app/build/outputs/apk/arch/release/app-arch-release.apk \
