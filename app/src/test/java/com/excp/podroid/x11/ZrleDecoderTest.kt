@@ -94,6 +94,144 @@ class ZrleDecoderTest {
         org.junit.Assert.assertArrayEquals(src, target)
     }
 
+    /**
+     * Real Xvnc output: every rect is one SYNC_FLUSH segment of a single session-long
+     * zlib stream, so each block ends with a few bytes (the empty stored block,
+     * 00 00 FF FF) that produce no output. When those bytes are the only thing left
+     * for the last 4096-byte input chunk, the tiles finish before that chunk is read,
+     * and the unread tail is then parsed as the next rect header.
+     */
+    @Test fun `rect whose last input chunk is only the sync flush tail leaves stream aligned`() {
+        // One SYNC_FLUSH segment of [def]'s stream, with the 4-byte length prefix.
+        // The output buffer is large enough for one deflate() call, so each rect gets
+        // exactly one flush, as a server does.
+        fun syncRect(def: Deflater, plain: ByteArray): ByteArray {
+            def.setInput(plain)
+            val out = java.io.ByteArrayOutputStream(); val buf = ByteArray(65536)
+            while (true) {
+                val n = def.deflate(buf, 0, buf.size, Deflater.SYNC_FLUSH)
+                out.write(buf, 0, n)
+                if (n < buf.size) break
+            }
+            val z = out.toByteArray()
+            return java.nio.ByteBuffer.allocate(4).putInt(z.size).array() + z
+        }
+        // One 64x64 plain-RLE tile: `singles` one-pixel runs of pseudo-random colors,
+        // then one run covering the rest. Varying `singles` moves the compressed
+        // length a few bytes at a time.
+        var seed = 0x2468ACE1
+        val colors = IntArray(64 * 64) {
+            seed = seed xor (seed shl 13); seed = seed xor (seed ushr 17); seed = seed xor (seed shl 5)
+            (0xFF shl 24) or (seed and 0xFFFFFF)
+        }
+        fun rleTile(singles: Int): ByteArray {
+            val plain = java.io.ByteArrayOutputStream()
+            plain.write(128) // plain RLE
+            for (i in 0 until singles) { plain.write(cpixel(colors[i])); plain.write(0) }
+            plain.write(cpixel(colors[singles]))
+            var rest = 64 * 64 - singles - 1 // run length minus one
+            while (rest >= 255) { plain.write(255); rest -= 255 }
+            plain.write(rest)
+            return plain.toByteArray()
+        }
+        // Find a tile whose compressed block is k*4096 + 4 bytes, so the decoder's
+        // last input chunk holds only the 4-byte stored-block tail. Probing uses a
+        // throwaway Deflater with the same settings (first segment of a stream).
+        var singles = -1
+        for (n in 1 until 64 * 64) {
+            val probe = Deflater(Deflater.DEFAULT_COMPRESSION, /*nowrap=*/false)
+            val len = syncRect(probe, rleTile(n)).size - 4
+            probe.end()
+            if (len > 4096 && len % 4096 == 4) { singles = n; break }
+        }
+        assertTrue("no tile gives compLen % 4096 == 4", singles > 0)
+        val expected1 = IntArray(64 * 64) { colors[minOf(it, singles)] }
+
+        val def = Deflater(Deflater.DEFAULT_COMPRESSION, /*nowrap=*/false)
+        val rect1 = syncRect(def, rleTile(singles))
+        assertEquals(4, java.nio.ByteBuffer.wrap(rect1, 0, 4).int % 4096)
+        val green = 0xFF00FF00.toInt()
+        val rect2 = syncRect(def, byteArrayOf(1) + cpixel(green))
+
+        val din = DataInputStream(ByteArrayInputStream(rect1 + rect2))
+        val dec = ZrleDecoder()
+        val t1 = IntArray(64 * 64)
+        dec.decode(din, 0, 0, 64, 64, t1, 64)
+        org.junit.Assert.assertArrayEquals(expected1, t1)
+        val t2 = IntArray(4)
+        dec.decode(din, 0, 0, 2, 2, t2, 2)
+        assertEquals(green, t2[0]); assertEquals(green, t2[3])
+        assertEquals(0, din.available())
+    }
+
+    // Subencoding 2 (1 bit per index) does not occur in the Xvnc captures under
+    // resources/x11, so it is covered here. Width 10 leaves 6 padding bits per row.
+    @Test fun `two colour packed palette tile decodes with row padding`() {
+        val a = 0xFF102030.toInt(); val b = 0xFFA0B0C0.toInt()
+        val w = 10; val h = 2
+        val rows = arrayOf(
+            intArrayOf(0, 1, 1, 0, 0, 0, 0, 0, 1, 1),
+            intArrayOf(1, 0, 0, 0, 0, 0, 0, 0, 0, 1),
+        )
+        val plain = java.io.ByteArrayOutputStream()
+        plain.write(2) // packed palette, 2 entries
+        plain.write(cpixel(a)); plain.write(cpixel(b))
+        for (r in rows) {
+            var hi = 0; var lo = 0
+            for (i in 0 until 8) hi = hi or (r[i] shl (7 - i))
+            for (i in 8 until w) lo = lo or (r[i] shl (15 - i))
+            plain.write(hi); plain.write(lo)
+        }
+        val target = IntArray(w * h)
+        ZrleDecoder().decode(DataInputStream(ByteArrayInputStream(zrleRect(plain.toByteArray()))), 0, 0, w, h, target, w)
+        val expected = IntArray(w * h) { if (rows[it / w][it % w] == 1) b else a }
+        org.junit.Assert.assertArrayEquals(expected, target)
+    }
+
+    // Subencoding 128 (plain RLE) does not occur in the Xvnc captures either. Runs
+    // cross row boundaries and use the multi-byte (0xFF continuation) run length.
+    @Test fun `plain RLE tile with runs crossing rows decodes`() {
+        val a = 0xFF0000FF.toInt(); val b = 0xFF00FF00.toInt(); val c = 0xFFFF0000.toInt()
+        val w = 64; val h = 64
+        val plain = java.io.ByteArrayOutputStream()
+        plain.write(128)
+        plain.write(cpixel(a)); plain.write(0)                      // run 1
+        plain.write(cpixel(b)); plain.write(0xFF); plain.write(44)  // run 255 + 44 + 1 = 300
+        plain.write(cpixel(c))                                      // rest: 4096 - 301 = 3795
+        var rest = w * h - 301 - 1
+        while (rest >= 255) { plain.write(0xFF); rest -= 255 }
+        plain.write(rest)
+        val target = IntArray(w * h)
+        ZrleDecoder().decode(DataInputStream(ByteArrayInputStream(zrleRect(plain.toByteArray()))), 0, 0, w, h, target, w)
+        val expected = IntArray(w * h) { if (it == 0) a else if (it <= 300) b else c }
+        org.junit.Assert.assertArrayEquals(expected, target)
+    }
+
+    @Test fun `corrupt zlib data is an RfbProtocolException wrapping DataFormatException`() {
+        // Valid zlib header, then a deflate block with the reserved BTYPE=11.
+        val rect = java.nio.ByteBuffer.allocate(4).putInt(4).array() +
+            byteArrayOf(0x78, 0x9C.toByte(), 0xFF.toByte(), 0xFF.toByte())
+        val ex = assertThrows(RfbProtocolException::class.java) {
+            ZrleDecoder().decode(DataInputStream(ByteArrayInputStream(rect)), 0, 0, 2, 2, IntArray(4), 2)
+        }
+        assertTrue("cause was ${ex.cause}", ex.cause is java.util.zip.DataFormatException)
+    }
+
+    @Test fun `ZRLE content errors are RfbProtocolException`() {
+        val plain = java.io.ByteArrayOutputStream()
+        plain.write(128) // plain RLE, 2x2 tile, one run of 5 overruns it
+        plain.write(cpixel(0xFFAABBCC.toInt()))
+        plain.write(0x04)
+        val din = DataInputStream(ByteArrayInputStream(zrleRect(plain.toByteArray())))
+        assertThrows(RfbProtocolException::class.java) {
+            ZrleDecoder().decode(din, 0, 0, 2, 2, IntArray(4), 2)
+        }
+        val unsupported = DataInputStream(ByteArrayInputStream(zrleRect(byteArrayOf(17))))
+        assertThrows(RfbProtocolException::class.java) {
+            ZrleDecoder().decode(unsupported, 0, 0, 1, 1, IntArray(1), 1)
+        }
+    }
+
     /** High: a packed-palette tile whose index exceeds the palette size → IOException, not AIOOBE. */
     @Test(expected = java.io.IOException::class)
     fun `packed palette index out of range throws IOException`() {

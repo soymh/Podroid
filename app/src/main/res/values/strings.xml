@@ -67,7 +67,7 @@
     <string name="storage_access_description">Optional. Mount your Android Downloads folder into the VM over virtio-9p.</string>
     <string name="enable_downloads_sharing">Enable Downloads sharing</string>
     <string name="grant_storage_access">Grant storage access</string>
-    <string name="requires_android_11">Requires Android 11+. On this device the toggle is for future-OS upgrades only.</string>
+    <string name="requires_android_11">On this device, sharing needs the storage permission granted below (Android 11+ uses all-files access instead).</string>
     <string name="storage_access_warning">Warning: on some devices this can crash the VM. Disable it if start fails.</string>
 
     <!-- Settings Sections -->
@@ -121,6 +121,7 @@
     <string name="port_already_forwarded">Port %1$d (%2$s) is already forwarded</string>
     <string name="port_reserved">Port %1$d is reserved for the in-app desktop</string>
     <string name="port_forward_table_full">Limit of %1$d port forwards reached. Remove one first.</string>
+    <string name="port_forward_partial_add">Port %1$d: %2$s could not be added, the port forward limit was reached.</string>
     <string name="reset">Reset</string>
     <string name="remove">Remove</string>
     <string name="port_forward_purpose_ssh">SSH</string>
@@ -190,6 +191,9 @@
     <string name="home_action_status">Status</string>
 
     <string name="up">Up</string>
+    <string name="uptime_hours_minutes">%1$dh %2$dm</string>
+    <string name="uptime_minutes_seconds">%1$dm %2$ds</string>
+    <string name="uptime_seconds">%1$ds</string>
 
     <!-- AVF Hint -->
     <string name="avf_available">AVF (KVM) available on this device</string>
@@ -277,6 +281,8 @@
     <string name="res_900p">900p</string>
     <string name="res_1080p">1080p</string>
     <string name="res_1440p">1440p</string>
+    <string name="x11_render_scale">Render scale</string>
+    <string name="x11_render_scale_hint">Lower is faster. The desktop is scaled up to fit the screen.</string>
     <string name="rotation">Rotation</string>
     <string name="auto_rotation">Auto</string>
     <string name="landscape">Landscape</string>

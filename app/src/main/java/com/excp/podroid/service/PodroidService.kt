@@ -42,6 +42,35 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.combine
 import javax.inject.Inject
 
+/**
+ * Runs [action], swallowing a denied foreground-service start instead of
+ * letting it crash the caller. Both a cold [VmControlReceiver] dispatch and
+ * a guest-requested [PodroidService.scheduleRestart] can call
+ * [PodroidService.start] outside a foreground context, where Android may
+ * deny it with a [android.app.ForegroundServiceStartNotAllowedException]
+ * (API 31+, extends [IllegalStateException]; pre-31 the same denial surfaces
+ * as a plain [IllegalStateException] from `startService()`). Never silent:
+ * logs one warning naming the cure (launch Podroid so its START_VM activity
+ * intent runs in the foreground, or exempt the app from battery
+ * optimization).
+ */
+private fun runIgnoringBackgroundFgsDenial(tag: String, action: () -> Unit) {
+    try {
+        action()
+    } catch (e: IllegalStateException) {
+        val backgroundFgsDenied = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            e is android.app.ForegroundServiceStartNotAllowedException
+        Log.w(
+            tag,
+            "could not start/stop the VM from the background " +
+                "(${if (backgroundFgsDenied) "foreground service start disallowed" else e.message}) - " +
+                "launch Podroid so its START_VM activity intent runs in the foreground, " +
+                "or exempt the app from battery optimization",
+            e,
+        )
+    }
+}
+
 @AndroidEntryPoint
 class PodroidService : Service() {
 
@@ -58,8 +87,6 @@ class PodroidService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
 
     private var notificationBuilder: NotificationCompat.Builder? = null
-    private var stopPendingIntent: PendingIntent? = null
-    private var openPendingIntent: PendingIntent? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -365,6 +392,8 @@ class PodroidService : Service() {
                         serviceScope.launch { observeStateForUsb() }
                     }
                     engine.start(rules, config)
+                } catch (c: CancellationException) {
+                    throw c // a stop/teardown cancelled this launch; not a start failure
                 } catch (e: Exception) {
                     Log.e(TAG, "QEMU failed to start", e)
                     // A Service-side throw here (failed asset extraction, a
@@ -416,9 +445,6 @@ class PodroidService : Service() {
             Intent(this, PodroidService::class.java).apply { action = ACTION_STOP },
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        openPendingIntent = openIntent
-        stopPendingIntent = stopIntent
-
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Podroid")
             .setSmallIcon(R.drawable.ic_vm_notification)
@@ -455,17 +481,23 @@ class PodroidService : Service() {
         }
     }
 
+    // HostRequestDispatcher.handleHeadless already rejects any action other
+    // than on/off/status before calling this, so the else branch here can
+    // never run.
     private fun handleHeadlessRequest(action: String): String = when (action) {
         "on" -> { headlessModeManager.setActive(true); com.excp.podroid.engine.hostbridge.HostProtocol.ok() }
         "off" -> { headlessModeManager.setActive(false); com.excp.podroid.engine.hostbridge.HostProtocol.ok() }
         "status" -> com.excp.podroid.engine.hostbridge.HostProtocol.ok(if (headlessModeManager.active.value) "on" else "off")
-        else -> com.excp.podroid.engine.hostbridge.HostProtocol.err("usage: on|off|status")
+        else -> error("unreachable: action=$action")
     }
 
     // Reply returned now; the stop/restart is posted to the main looper so the
     // bridge flushes the response before the VM (and this service) tear down. The
     // Handler callbacks capture the app-scoped engine + applicationContext (NOT
     // `this`), so they survive this service's death.
+    // HostRequestDispatcher.handlePower already rejects any action other than
+    // stop/restart/status before calling this, so the else branch here can
+    // never run.
     private fun handlePowerRequest(action: String): String {
         val proto = com.excp.podroid.engine.hostbridge.HostProtocol
         return when (action) {
@@ -485,7 +517,7 @@ class PodroidService : Service() {
                 proto.ok()
             }
             "restart" -> { scheduleRestart(); proto.ok() }
-            else -> proto.err("usage: stop|restart|status")
+            else -> error("unreachable: action=$action")
         }
     }
 
@@ -504,10 +536,10 @@ class PodroidService : Service() {
                     // it as terminal could fire start() during a teardown blip.
                     val terminal = s is VmState.Stopped || s is VmState.Error
                     when {
-                        terminal -> PodroidService.start(ctx)
+                        terminal -> runIgnoringBackgroundFgsDenial(TAG) { PodroidService.start(ctx) }
                         tries++ >= 40 -> {
                             Log.w(TAG, "restart: VM did not reach a stopped state in time (state=$s); starting anyway")
-                            PodroidService.start(ctx)
+                            runIgnoringBackgroundFgsDenial(TAG) { PodroidService.start(ctx) }
                         }
                         else -> main.postDelayed(this, 250)
                     }
@@ -583,30 +615,8 @@ class VmControlReceiver : BroadcastReceiver() {
         }
     }
 
-    /**
-     * Runs a start()/stop() dispatch, swallowing a denied foreground-service
-     * start instead of letting it crash the receiver. Never silent: logs one
-     * warning naming the cure (launch Podroid itself so its activity's
-     * START_VM intent-filter fires the start in the foreground, or exempt
-     * the app from battery optimization so a cold background start is
-     * allowed).
-     */
-    private fun dispatch(action: () -> Unit) {
-        try {
-            action()
-        } catch (e: IllegalStateException) {
-            val backgroundFgsDenied = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-                e is android.app.ForegroundServiceStartNotAllowedException
-            Log.w(
-                TAG,
-                "VmControlReceiver could not start/stop the VM from the background " +
-                    "(${if (backgroundFgsDenied) "foreground service start disallowed" else e.message}) - " +
-                    "launch Podroid so its START_VM activity intent runs in the foreground, " +
-                    "or exempt the app from battery optimization",
-                e,
-            )
-        }
-    }
+    /** See [runIgnoringBackgroundFgsDenial] for what this guards against. */
+    private fun dispatch(action: () -> Unit) = runIgnoringBackgroundFgsDenial(TAG, action)
 
     companion object {
         private const val TAG = "VmControlReceiver"

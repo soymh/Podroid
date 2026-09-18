@@ -3,8 +3,8 @@
  * Copyright (C) 2024-2026 Podroid contributors
  *
  * Bottom sheet for X11 viewer settings: resolution mode/preset/custom
- * and rotation lock. TOUCH (Phase 4) and DISPLAY (Phase 5) sections
- * will be appended to the Column below the rotation section.
+ * (plus render scale in MATCH mode), rotation lock, touch mode, and
+ * display (DPI) sections, in that order down the Column.
  */
 package com.excp.podroid.ui.screens.x11
 
@@ -120,6 +120,30 @@ fun X11SettingsSheet(viewModel: X11ViewModel, onDismiss: () -> Unit) {
                     initialW = s.customW,
                     initialH = s.customH,
                     onCommit = { w, h -> viewModel.setCustom(w, h) },
+                )
+            }
+
+            if (s.resolutionMode == ResolutionMode.MATCH) {
+                Spacer(Modifier.height(PodroidTokens.Spacing.SM))
+                PodroidSectionLabel(stringResource(R.string.x11_render_scale))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(PodroidTokens.Spacing.SM),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    listOf(100, 75, 50).forEach { scale ->
+                        FilterChip(
+                            selected = s.renderScale == scale,
+                            onClick = { viewModel.setRenderScale(scale) },
+                            label = { Text("$scale%") },
+                            shape = RoundedCornerShape(PodroidTokens.Radius.Chip),
+                            colors = PodroidChipColors(),
+                        )
+                    }
+                }
+                Text(
+                    stringResource(R.string.x11_render_scale_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
 

@@ -15,6 +15,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.excp.podroid.BuildConfig
 import com.excp.podroid.R
+import com.excp.podroid.data.repository.AddRuleResult
 import com.excp.podroid.data.repository.LanguageManager
 import com.excp.podroid.data.repository.PortForwardRepository
 import com.excp.podroid.data.repository.PortForwardRule
@@ -77,24 +78,9 @@ class SettingsViewModel @Inject constructor(
     @ApplicationScope private val externalScope: CoroutineScope,
 ) : ViewModel() {
 
-    val vmRamMb: StateFlow<Int> = settingsRepository.vmRamMb
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 512)
-
-    val vmCpus: StateFlow<Int> = settingsRepository.vmCpus
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 1)
-
-    val qemuExtraArgs: StateFlow<String> = settingsRepository.qemuExtraArgs
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), SettingsRepository.DEFAULT_QEMU_EXTRA_ARGS)
-
-    val kernelExtraCmdline: StateFlow<String> = settingsRepository.kernelExtraCmdline
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), SettingsRepository.DEFAULT_KERNEL_EXTRA_CMDLINE)
-
     /**
      * Single combined stream of the 8 form-style rows. SettingsScreen can collect
      * this once with collectAsStateWithLifecycle instead of subscribing 8 times.
-     * The original per-flow StateFlows above are kept so callers that want one
-     * value (e.g. the About section reading storageSizeGb) don't pay for the
-     * combined object on every emit.
      */
     val uiState: StateFlow<SettingsUiState> = combine(
         combine(
@@ -163,9 +149,6 @@ class SettingsViewModel @Inject constructor(
     fun resetKernelExtraCmdline() {
         externalScope.launch { settingsRepository.setKernelExtraCmdline(SettingsRepository.DEFAULT_KERNEL_EXTRA_CMDLINE) }
     }
-
-    val storageSizeGb: StateFlow<Int> = settingsRepository.storageSizeGb
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 2)
 
     fun setSshEnabled(value: Boolean) {
         viewModelScope.launch { settingsRepository.setSshEnabled(value) }
@@ -272,18 +255,6 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    fun setTerminalFontSize(value: Int) {
-        viewModelScope.launch { settingsRepository.setTerminalFontSize(value) }
-    }
-
-    fun setTerminalColorTheme(value: String) {
-        viewModelScope.launch { settingsRepository.setTerminalColorTheme(value) }
-    }
-
-    fun setTerminalFont(value: String) {
-        viewModelScope.launch { settingsRepository.setTerminalFont(value) }
-    }
-
     // "both" expands into separate TCP + UDP rules. Returns true if at least one
     // rule was added; false if every expansion was already present (duplicate).
     // The caller uses the return value to show feedback instead of silently
@@ -300,8 +271,18 @@ class SettingsViewModel @Inject constructor(
         }
         if (toAdd.isEmpty()) return false
         viewModelScope.launch {
-            toAdd.forEach { proto ->
-                portForwardRepository.addRule(PortForwardRule(hostPort, guestPort, proto))
+            // "both" can add TCP then hit the table ceiling on UDP (or vice
+            // versa): the dialog already closed on the true return below, so
+            // that partial outcome would otherwise vanish silently.
+            val notAdded = toAdd.filter { proto ->
+                portForwardRepository.addRule(PortForwardRule(hostPort, guestPort, proto)) != AddRuleResult.ADDED
+            }
+            if (notAdded.isNotEmpty() && notAdded.size < toAdd.size) {
+                _portForwardPartialWarning.value = context.getString(
+                    R.string.port_forward_partial_add,
+                    hostPort,
+                    notAdded.joinToString(", ") { it.uppercase() },
+                )
             }
         }
         return true
@@ -330,6 +311,14 @@ class SettingsViewModel @Inject constructor(
     val exportError: StateFlow<String?> = _exportError.asStateFlow()
 
     fun clearExportError() { _exportError.value = null }
+
+    private val _portForwardPartialWarning = MutableStateFlow<String?>(null)
+    /** One-shot warning when a "both" add only added one protocol (e.g. the
+     *  table filled between the TCP and UDP rule); clear after showing with
+     *  [clearPortForwardPartialWarning]. */
+    val portForwardPartialWarning: StateFlow<String?> = _portForwardPartialWarning.asStateFlow()
+
+    fun clearPortForwardPartialWarning() { _portForwardPartialWarning.value = null }
 
     fun removePortForward(rule: PortForwardRule) {
         viewModelScope.launch { portForwardRepository.removeRule(rule) }
@@ -534,10 +523,13 @@ class SettingsViewModel @Inject constructor(
          * new component starts logging, or its lines won't reach the export.
          */
         private val APP_LOG_TAGS = listOf(
-            "AudioStreamer", "AvfEngine", "AvfReflect", "ConsoleFanout",
-            "EngineHolder", "PodroidApp", "PodroidService", "PodroidVM-err",
-            "QemuEngine", "QmpClient", "SettingsViewModel", "TerminalVM",
-            "VsockControlChannel", "VsockPortForwarder",
+            "AudioStreamer", "AvfDownloadsShare", "AvfEngine", "AvfReflect",
+            "ConsoleFanout", "EngineHolder", "HomeViewModel", "HostRequestServer",
+            "LanguageManager", "Ninep2000LServer", "PodroidApp", "PodroidService",
+            "PodroidVM-err", "QemuBootMonitor", "QemuEngine", "QmpClient",
+            "SettingsViewModel", "TerminalVM", "UpdateRepository", "UsbPassthrough",
+            "VmControlReceiver", "VsockControlChannel", "VsockPortForwarder",
+            "VsockUdpForwarder", "X11Stats", "X11ViewModel",
         )
     }
 }

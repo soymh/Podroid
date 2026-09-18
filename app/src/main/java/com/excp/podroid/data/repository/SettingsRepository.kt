@@ -89,6 +89,7 @@ class SettingsRepository @Inject constructor(
         val KEY_X11_ROTATION        = stringPreferencesKey("x11_rotation_lock")
         val KEY_X11_SHOW_EXTRA_KEYS = booleanPreferencesKey("x11_show_extra_keys")
         val KEY_X11_DPI             = intPreferencesKey("x11_dpi")
+        val KEY_X11_RENDER_SCALE    = intPreferencesKey("x11_render_scale")
         val KEY_LANGUAGE              = stringPreferencesKey("language")
 
         /**
@@ -149,7 +150,6 @@ class SettingsRepository @Inject constructor(
     val hapticsEnabled       = pref(KEY_HAPTICS_ENABLED, true)
     val dynamicColorEnabled  = pref(KEY_DYNAMIC_COLOR_ENABLED, false)
     val lastBootDurationMs   = pref(KEY_LAST_BOOT_DURATION_MS, 0L)
-    val lastContainerCount   = pref(KEY_LAST_CONTAINER_COUNT, -1)
     // Routed through pref() so a corrupted store emits the "auto" default instead
     // of throwing into LanguageManager's locale collector.
     val language: Flow<String> = pref(KEY_LANGUAGE, "auto")
@@ -185,7 +185,6 @@ class SettingsRepository @Inject constructor(
     suspend fun setTerminalFontSize(value: Int)          = set(KEY_FONT_SIZE, value)
     suspend fun setStorageSizeGb(value: Int)             = set(KEY_STORAGE_GB, value)
     suspend fun setStorageAccessEnabled(value: Boolean)  = set(KEY_STORAGE_ACCESS_ENABLED, value)
-    suspend fun markSetupDone()                          = set(KEY_SETUP_DONE, true)
     suspend fun setSshEnabled(value: Boolean)            = set(KEY_SSH_ENABLED, value)
     suspend fun setTerminalColorTheme(value: String)     = set(KEY_TERMINAL_COLOR_THEME, value)
     suspend fun setTerminalFont(value: String)           = set(KEY_TERMINAL_FONT, value)
@@ -254,6 +253,7 @@ class SettingsRepository @Inject constructor(
             rotationLock = runCatching { com.excp.podroid.x11.RotationLock.valueOf(p[KEY_X11_ROTATION] ?: "AUTO") }.getOrDefault(com.excp.podroid.x11.RotationLock.AUTO),
             showExtraKeys = p[KEY_X11_SHOW_EXTRA_KEYS] ?: true,
             dpi = p[KEY_X11_DPI] ?: 96,
+            renderScale = (p[KEY_X11_RENDER_SCALE] ?: 100).let { if (it == 100 || it == 75 || it == 50) it else 100 },
         )
     }
 
@@ -269,6 +269,7 @@ class SettingsRepository @Inject constructor(
     suspend fun setX11Rotation(v: String) = set(KEY_X11_ROTATION, v)
     suspend fun setX11ShowExtraKeys(v: Boolean) = set(KEY_X11_SHOW_EXTRA_KEYS, v)
     suspend fun setX11Dpi(v: Int) = set(KEY_X11_DPI, v)
+    suspend fun setX11RenderScale(v: Int) = set(KEY_X11_RENDER_SCALE, v)
     suspend fun getX11DpiSnapshot() = (x11Settings.first()).dpi
     suspend fun getLanguageSnapshot()                    = language.first()
 
@@ -278,7 +279,6 @@ class SettingsRepository @Inject constructor(
     suspend fun getVmCpusSnapshot()               = vmCpus.first()
     suspend fun getStorageSizeGbSnapshot()        = storageSizeGb.first()
     suspend fun getStorageAccessEnabledSnapshot() = storageAccessEnabled.first()
-    suspend fun isSetupDoneSnapshot()             = isSetupDone.first()
     suspend fun getTerminalColorThemeSnapshot()   = terminalColorTheme.first()
     suspend fun getTerminalFontSnapshot()         = terminalFont.first()
     suspend fun getQemuExtraArgsSnapshot()        = qemuExtraArgs.first()
@@ -287,7 +287,6 @@ class SettingsRepository @Inject constructor(
     suspend fun getAvfVerboseLoggingSnapshot()    = avfVerboseLogging.first()
     suspend fun getAvfCpuCapSnapshot()            = avfCpuCap.first()
     suspend fun getUsbPassthroughEnabledSnapshot() = usbPassthroughEnabled.first()
-    suspend fun getLoadBalanceEnabledSnapshot()    = loadBalanceEnabled.first()
     suspend fun getBandwidthMbpsSnapshot()         = bandwidthMbps.first()
     suspend fun getAutostartOnBootSnapshot()       = autostartOnBoot.first()
 }

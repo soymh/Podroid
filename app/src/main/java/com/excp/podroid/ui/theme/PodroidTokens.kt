@@ -26,8 +26,6 @@ object PodroidTokens {
         val LG  = 16.dp
         val XL  = 20.dp
         val XL2 = 24.dp
-        val XL3 = 32.dp
-        val XL4 = 40.dp
     }
 
     object Radius {
@@ -35,7 +33,6 @@ object PodroidTokens {
         val Button = 8.dp
         val Card   = 12.dp
         val Sheet  = 20.dp
-        val Large  = 24.dp
     }
 
     object TypeSize {
@@ -91,8 +88,16 @@ object PodroidTokens {
         val outFile = File(context.filesDir, assetPath)
         if (outFile.exists() && outFile.length() > 0) return outFile
         outFile.parentFile?.mkdirs()
+        // Write to a tmp file and rename onto outFile so a process killed
+        // mid-copy never leaves a half-written font at the canonical path
+        // (the exists()+length() check above would otherwise treat it as done).
+        val tmpFile = File(outFile.parentFile, outFile.name + ".tmp")
         context.assets.open(assetPath).use { input ->
-            FileOutputStream(outFile).use { output -> input.copyTo(output) }
+            FileOutputStream(tmpFile).use { output -> input.copyTo(output) }
+        }
+        if (!tmpFile.renameTo(outFile)) {
+            tmpFile.delete()
+            throw java.io.IOException("atomic rename ${tmpFile.name} -> ${outFile.name} failed")
         }
         return outFile
     }
