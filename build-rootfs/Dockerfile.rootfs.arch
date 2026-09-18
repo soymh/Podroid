@@ -57,13 +57,16 @@ RUN curl -L --retry 3 -o alarm.tar.gz \
 # - Pacman 7 sandboxes downloads via Landlock + an unprivileged `alpm` user;
 #   build containers lack Landlock, so DB sync fails without DisableSandbox
 #   (the documented container escape hatch; guest runtime is unaffected).
-# - The chroot has no devtmpfs: ensure basic /dev nodes exist (best-effort —
-#   the tarball usually ships them; missing /dev/null breaks gpg/scriptlets).
+# - libalpm requires /etc/mtab to resolve mount points (disk-space checks);
+#   a chroot has no proc mount, so ship a static `/` entry (enough for the
+#   statvfs lookups; remove any dangling symlink first).
 RUN mkdir -p /work/alarmroot/dev \
     && for dev in "null c 1 3" "zero c 1 5" "random c 1 8" "urandom c 1 9"; do \
            set -- $dev; \
            [ -e "/work/alarmroot/dev/$1" ] || mknod -m 666 "/work/alarmroot/dev/$1" $2 $3 $4 2>/dev/null || true; \
        done \
+    && rm -f /work/alarmroot/etc/mtab \
+    && printf '/ / overlay rw,relatime 0 0\n' > /work/alarmroot/etc/mtab \
     && sed -i '/^#*DisableSandbox/d; /^\[options\]/a DisableSandbox' /work/alarmroot/etc/pacman.conf \
     && grep -q '^DisableSandbox' /work/alarmroot/etc/pacman.conf \
     && cp /etc/resolv.conf /work/alarmroot/etc/resolv.conf \
