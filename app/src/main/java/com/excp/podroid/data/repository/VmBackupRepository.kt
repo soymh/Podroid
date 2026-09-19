@@ -143,8 +143,10 @@ class VmBackupRepository @Inject constructor(
             try {
                 sparseCopySeek(src, dst, total, onProgress)
             } catch (e: ErrnoException) {
+                // NOTE: the "not supported" errno is EOPNOTSUPP in
+                // android.system.OsConstants (there is no ENOTSUP there).
                 if (e.errno == OsConstants.ENOSYS || e.errno == OsConstants.EINVAL ||
-                    e.errno == OsConstants.ENOTSUP
+                    e.errno == OsConstants.EOPNOTSUPP
                 ) {
                     fallback()
                 } else {
