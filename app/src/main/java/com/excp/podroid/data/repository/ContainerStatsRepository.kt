@@ -25,8 +25,14 @@ class ContainerStatsRepository @Inject constructor(
 
     suspend fun readContainerCount(): Int? {
         val file = statsFile()
+        // Fresh installs may lack All-files access (or the user revoked it):
+        // isFile is true but the read throws EACCES, which previously escaped
+        // onto the caller and crashed the app on launch. Treat unreadable as
+        // absent and fall back to the last known count. canRead() short-
+        // circuits the common case; runCatching covers races (revoke/delete
+        // mid-read) on any API level.
         val text = withContext(Dispatchers.IO) {
-            if (file.isFile) file.readText() else null
+            runCatching { if (file.isFile && file.canRead()) file.readText() else null }.getOrNull()
         } ?: return settingsRepository.getLastContainerCount()
         val parsed = text.trim().toIntOrNull() ?: return settingsRepository.getLastContainerCount()
         settingsRepository.setLastContainerCount(parsed)
