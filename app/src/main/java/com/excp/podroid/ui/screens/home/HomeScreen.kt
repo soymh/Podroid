@@ -487,7 +487,7 @@ private fun HomeDataSection(
         PodroidListRow(label = stringResource(R.string.phone_ip), value = phoneIp, mono = true)
         PodroidListRow(
             label = stringResource(R.string.ssh),
-            value = if (meta.sshEnabled) ":${PodroidService.SSH_HOST_PORT} · podroid" else stringResource(R.string.off),
+            value = if (meta.sshEnabled) ":${PodroidService.SSH_HOST_PORT} · ${stringResource(R.string.default_root_password)}" else stringResource(R.string.off),
             mono = meta.sshEnabled,
         )
         PodroidListRow(

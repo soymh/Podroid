@@ -23,10 +23,10 @@ mkdir -p "$ROOTFS/etc/sudoers.d"
 echo "%wheel ALL=(ALL) ALL" > "$ROOTFS/etc/sudoers.d/wheel"
 chmod 0440 "$ROOTFS/etc/sudoers.d/wheel"
 
-# Set root password to "podroid" (pre-hashed with openssl).
-# We can't run chpasswd inside the aarch64 rootfs from an x86_64 host,
-# so write the SHA-512 hash directly into /etc/shadow.
-ROOT_HASH=$(openssl passwd -6 podroid)
+# Set root password to "archdroid" (ArchDroid's counterpart to Alpine's
+# "podroid"). Pre-hashed: we can't run chpasswd inside the aarch64 rootfs
+# from an x86_64 host, so write the SHA-512 hash directly into /etc/shadow.
+ROOT_HASH=$(openssl passwd -6 archdroid)
 sed -i "s|^root:[^:]*:|root:${ROOT_HASH}:|" "$ROOTFS/etc/shadow"
 
 # Strip docs/man/locale to shrink squashfs.
@@ -209,7 +209,7 @@ cat > "$ROOTFS/etc/issue" <<'EOF'
 Welcome to Podroid (Arch Linux)
 Kernel \r on \m (\l)
 
-  Default login:  root  /  podroid
+  Default login:  root  /  archdroid
   Change root password:    passwd
   Create a regular user:   useradd -G wheel <name>
                            (wheel group → can run sudo)
