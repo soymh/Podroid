@@ -182,6 +182,21 @@
     <string name="container_backup_refresh">Refresh list</string>
     <string name="container_backup_none">No backup archives found in Downloads/Podroid/backups yet.</string>
     <string name="container_backup_copied">Command copied</string>
+    <string name="vm_backup_title">Full VM backup</string>
+    <string name="vm_backup_description">Snapshot the entire VM disk (storage.img: installed packages, containers, home, settings markers) into Downloads/Podroid/vm-backups. The system squashfs is not included — it is replaced on every app update. Copy the folder off-device to move the VM to another phone.</string>
+    <string name="vm_backup_now">Back up VM now</string>
+    <string name="vm_backup_refresh">Refresh VM list</string>
+    <string name="vm_backup_none">No VM backups yet.</string>
+    <string name="vm_backup_restore">Restore</string>
+    <string name="vm_backup_delete">Delete</string>
+    <string name="vm_backup_manifest_meta">%1$s · code %2$d · %3$d GB</string>
+    <string name="vm_backup_stopped_only">Stop the VM first — copying a running disk risks corruption.</string>
+    <string name="vm_backup_unreachable">Backup folder unreachable — grant storage access first.</string>
+    <string name="vm_backup_success">VM backed up (%1$s).</string>
+    <string name="vm_backup_failed">Operation failed: %1$s</string>
+    <string name="vm_backup_confirm_restore">Restore replaces the current disk (kept as storage.img.bak). Tap Restore on %1$s again within 15 seconds to confirm.</string>
+    <string name="vm_restore_success">Restored. Start the VM to boot into it.</string>
+    <string name="vm_backup_warning">Restore is destructive: it replaces storage.img (the previous image is kept once as storage.img.bak). Restores from the other distro boot, but may carry stale configs — same-flavor restores are cleanest. Backups contain everything on the disk, including keys.</string>
 
     <!-- Home -->
     <string name="home_containers_created">Containers created</string>

@@ -182,6 +182,21 @@
     <string name="container_backup_refresh">刷新列表</string>
     <string name="container_backup_none">Downloads/Podroid/backups 中尚未找到备份归档。</string>
     <string name="container_backup_copied">命令已复制</string>
+    <string name="vm_backup_title">虚拟机完整备份</string>
+    <string name="vm_backup_description">将整个虚拟机磁盘（storage.img：已安装软件包、容器、主目录、设置标记）快照到 Downloads/Podroid/vm-backups。系统 squashfs 不包含在内——每次应用更新都会替换它。将该文件夹复制出设备，即可把虚拟机迁移到另一部手机。</string>
+    <string name="vm_backup_now">立即备份虚拟机</string>
+    <string name="vm_backup_refresh">刷新虚拟机列表</string>
+    <string name="vm_backup_none">暂无虚拟机备份。</string>
+    <string name="vm_backup_restore">恢复</string>
+    <string name="vm_backup_delete">删除</string>
+    <string name="vm_backup_manifest_meta">%1$s · 版本 %2$d · %3$d GB</string>
+    <string name="vm_backup_stopped_only">请先停止虚拟机——复制运行中的磁盘可能损坏数据。</string>
+    <string name="vm_backup_unreachable">备份文件夹不可用——请先授予存储访问权限。</string>
+    <string name="vm_backup_success">虚拟机已备份（%1$s）。</string>
+    <string name="vm_backup_failed">操作失败：%1$s</string>
+    <string name="vm_backup_confirm_restore">恢复将替换当前磁盘（旧磁盘保留为 storage.img.bak）。请在 15 秒内再次点击 %1$s 的“恢复”以确认。</string>
+    <string name="vm_restore_success">已恢复。启动虚拟机即可进入。</string>
+    <string name="vm_backup_warning">恢复是破坏性操作：它会替换 storage.img（旧镜像仅保留一份 storage.img.bak）。跨发行版恢复可以启动，但可能携带过期配置——同发行版恢复最干净。备份包含磁盘上的一切内容，包括密钥。</string>
 
     <!-- Home -->
     <string name="home_containers_created">已创建容器</string>

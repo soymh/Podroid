@@ -3,6 +3,7 @@ package com.excp.podroid.ui.screens.backup
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -15,12 +16,14 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.windowsizeclass.WindowSizeClass
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -189,7 +192,101 @@ fun ContainerBackupScreen(
                         )
                     }
                 }
+
+                Spacer(Modifier.height(PodroidTokens.Spacing.SM))
+                PodroidSectionLabel(stringResource(R.string.vm_backup_title))
+                Text(
+                    text = stringResource(R.string.vm_backup_description),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (!ui.vmStopped) {
+                    Text(
+                        text = stringResource(R.string.vm_backup_stopped_only),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                PodroidPrimaryButton(
+                    text = stringResource(R.string.vm_backup_now),
+                    onClick = viewModel::backupVm,
+                    enabled = ui.vmStopped && ui.vmProgress == null,
+                )
+                if (ui.vmProgress != null) {
+                    val pct = (ui.vmProgress!! * 100).toInt()
+                    Text(
+                        text = "$pct%",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                    LinearProgressIndicator(
+                        progress = { ui.vmProgress!! },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                PodroidGhostButton(
+                    text = stringResource(R.string.vm_backup_refresh),
+                    onClick = viewModel::refreshVmBackups,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (ui.vmBackups.isEmpty()) {
+                    Text(
+                        text = stringResource(R.string.vm_backup_none),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    ui.vmBackups.forEach { file ->
+                        PodroidListRow(
+                            label = file.name,
+                            value = "${viewModel.formatSize(file.sizeBytes)} · ${viewModel.formatDate(file.lastModifiedMs)}",
+                            mono = true,
+                        )
+                        file.manifest?.let { m ->
+                            Text(
+                                text = stringResource(
+                                    R.string.vm_backup_manifest_meta,
+                                    m.flavor,
+                                    m.versionCode,
+                                    m.storageSizeGb,
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontFamily = FontFamily.Monospace,
+                            )
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(PodroidTokens.Spacing.MD),
+                        ) {
+                            PodroidGhostButton(
+                                text = stringResource(R.string.vm_backup_restore),
+                                onClick = { viewModel.restoreVm(file) },
+                                enabled = ui.vmStopped && ui.vmProgress == null,
+                                modifier = Modifier.weight(1f),
+                            )
+                            PodroidGhostButton(
+                                text = stringResource(R.string.vm_backup_delete),
+                                onClick = { viewModel.deleteVmBackup(file) },
+                                enabled = ui.vmProgress == null,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                    }
+                }
+                Text(
+                    text = stringResource(R.string.vm_backup_warning),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = PodroidTokens.Amber,
+                )
             }
+        }
+    }
+    ui.vmMessage?.let { msg ->
+        LaunchedEffect(msg) {
+            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+            viewModel.clearVmMessage()
         }
     }
 }
