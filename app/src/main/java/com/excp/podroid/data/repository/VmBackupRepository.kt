@@ -17,7 +17,6 @@ import android.system.OsConstants
 import com.excp.podroid.BuildConfig
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
@@ -64,6 +63,13 @@ class VmBackupRepository @Inject constructor(
     }
 
     fun storageFile(): File = File(context.filesDir, STORAGE_IMG)
+
+    // SEEK_* come from <fcntl.h> (stable Linux UAPI, never renumbered):
+    // android.system.OsConstants does not expose them.
+    private companion object {
+        const val SEEK_DATA = 3
+        const val SEEK_HOLE = 4
+    }
 
     fun isDownloadsReachable(): Boolean {
         val dir = backupDirectory()
@@ -139,9 +145,10 @@ class VmBackupRepository @Inject constructor(
     suspend fun sparseCopy(src: File, dst: File, onProgress: (Long, Long) -> Unit) {
         val total = src.length()
         withContext(Dispatchers.IO) {
-            val fallback = { copyStream(src, dst, total, onProgress) }
+            val scope = this
+            val fallback: suspend () -> Unit = { copyStream(src, dst, total, onProgress, scope) }
             try {
-                sparseCopySeek(src, dst, total, onProgress)
+                sparseCopySeek(src, dst, total, onProgress, scope)
             } catch (e: ErrnoException) {
                 // NOTE: the "not supported" errno is EOPNOTSUPP in
                 // android.system.OsConstants (there is no ENOTSUP there).
@@ -161,6 +168,7 @@ class VmBackupRepository @Inject constructor(
         dst: File,
         total: Long,
         onProgress: (Long, Long) -> Unit,
+        scope: kotlinx.coroutines.CoroutineScope,
     ) {
         FileInputStream(src).use { fis ->
             FileOutputStream(dst).use { fos ->
@@ -173,15 +181,15 @@ class VmBackupRepository @Inject constructor(
                 var done = 0L
                 onProgress(0L, total)
                 while (off < total) {
-                    ensureActive()
+                    scope.ensureActive()
                     val dataOff = try {
-                        Os.lseek(inFd, off, OsConstants.SEEK_DATA)
+                        Os.lseek(inFd, off, SEEK_DATA)
                     } catch (e: ErrnoException) {
                         if (e.errno == OsConstants.ENXIO) break else throw e
                     }
                     if (dataOff < 0 || dataOff >= total) break
                     val holeOff = try {
-                        Os.lseek(inFd, dataOff, OsConstants.SEEK_HOLE)
+                        Os.lseek(inFd, dataOff, SEEK_HOLE)
                     } catch (e: ErrnoException) {
                         if (e.errno == OsConstants.ENXIO) total else throw e
                     }
@@ -189,7 +197,7 @@ class VmBackupRepository @Inject constructor(
                     fis.channel.position(pos)
                     fos.channel.position(pos)
                     while (pos < holeOff) {
-                        ensureActive()
+                        scope.ensureActive()
                         val n = fis.read(buf, 0, min(buf.size.toLong(), holeOff - pos).toInt())
                         if (n <= 0) break
                         fos.write(buf, 0, n)
@@ -210,6 +218,7 @@ class VmBackupRepository @Inject constructor(
         dst: File,
         total: Long,
         onProgress: (Long, Long) -> Unit,
+        scope: kotlinx.coroutines.CoroutineScope,
     ) {
         FileInputStream(src).channel.use { ic ->
             FileOutputStream(dst).channel.use { oc ->
@@ -218,7 +227,7 @@ class VmBackupRepository @Inject constructor(
                 val buf = java.nio.ByteBuffer.allocateDirect(1024 * 1024)
                 onProgress(0L, total)
                 while (true) {
-                    ensureActive()
+                    scope.ensureActive()
                     buf.clear()
                     n = ic.read(buf).toLong()
                     if (n <= 0) break

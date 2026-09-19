@@ -55,29 +55,57 @@ class ContainerBackupViewModel @Inject constructor(
     private var armedRestoreName: String? = null
     private var armedRestoreAtMs: Long = 0L
 
-    val uiState: StateFlow<ContainerBackupUiState> = combine(
-        engine.state,
-        settingsRepository.storageAccessEnabled,
-        _containerName,
-        _imageRef,
-        _backupFiles,
-        _vmBackups,
-        _vmProgress,
-        _vmMessage,
-    ) { vmState, storageAccess, container, image, files, vmFiles, vmProgress, vmMessage ->
-        ContainerBackupUiState(
-            vmRunning = vmState is VmState.Running,
-            vmStopped = vmState is VmState.Idle || vmState is VmState.Stopped || vmState is VmState.Error,
-            storageAccessEnabled = storageAccess,
-            guestPath = repository.guestBackupPathLabel(storageAccess),
-            backupFiles = files,
-            containerName = container,
-            imageRef = image,
-            vmBackups = vmFiles,
-            vmProgress = vmProgress,
-            vmMessage = vmMessage,
-        )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ContainerBackupUiState())
+    private data class VmExtra(
+        val files: List<VmBackupFile>,
+        val progress: Float?,
+        val message: String?,
+    )
+
+    // Split below the combine-arity ceiling: 3 + 3 + 2, then merged 3-wide.
+    // (One 8-wide combine does not resolve on this toolchain.)
+    private val vmExtra: StateFlow<VmExtra> =
+        combine(_vmBackups, _vmProgress, _vmMessage) { files, progress, message ->
+            VmExtra(files, progress, message)
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), VmExtra(emptyList(), null, null))
+
+    private data class CoreState(
+        val vmState: VmState,
+        val storageAccess: Boolean,
+        val container: String,
+    )
+
+    private val coreState: StateFlow<CoreState> =
+        combine(engine.state, settingsRepository.storageAccessEnabled, _containerName) { s, a, c ->
+            CoreState(s, a, c)
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), CoreState(VmState.Idle, false, ""))
+
+    private data class FileState(
+        val image: String,
+        val files: List<ContainerBackupFile>,
+    )
+
+    private val fileState: StateFlow<FileState> =
+        combine(_imageRef, _backupFiles) { i, f ->
+            FileState(i, f)
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), FileState("", emptyList()))
+
+    val uiState: StateFlow<ContainerBackupUiState> =
+        combine(coreState, fileState, vmExtra) { core, files, extra ->
+            ContainerBackupUiState(
+                vmRunning = core.vmState is VmState.Running,
+                vmStopped = core.vmState is VmState.Idle ||
+                    core.vmState is VmState.Stopped ||
+                    core.vmState is VmState.Error,
+                storageAccessEnabled = core.storageAccess,
+                guestPath = repository.guestBackupPathLabel(core.storageAccess),
+                backupFiles = files.files,
+                containerName = core.container,
+                imageRef = files.image,
+                vmBackups = extra.files,
+                vmProgress = extra.progress,
+                vmMessage = extra.message,
+            )
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ContainerBackupUiState())
 
     init {
         refresh()
