@@ -180,7 +180,15 @@ jobs:
           distribution: 'temurin'
 
       - name: Build debug APKs
-        run: ./gradlew assembleAlpineDebug assembleArchDebug
+        run: ./gradlew assembleAlpineDebug assembleArchDebug --console=plain --stacktrace 2>&1 | tee gradle-build.log
+
+      - name: Upload Gradle build log (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-build-log
+          path: gradle-build.log
+          retention-days: 7
 
       - name: Upload Alpine debug APK
         uses: actions/upload-artifact@v4
@@ -266,12 +274,20 @@ jobs:
         run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
 
       - name: Build release APKs
-        run: ./gradlew assembleAlpineRelease assembleArchRelease
+        run: ./gradlew assembleAlpineRelease assembleArchRelease --console=plain --stacktrace 2>&1 | tee gradle-release-build.log
         env:
           PODROID_RELEASE_STORE_FILE: podroid-release.jks
           PODROID_RELEASE_STORE_PASSWORD: ${{ secrets.PODROID_RELEASE_STORE_PASSWORD }}
           PODROID_RELEASE_KEY_ALIAS: ${{ secrets.PODROID_RELEASE_KEY_ALIAS }}
           PODROID_RELEASE_KEY_PASSWORD: ${{ secrets.PODROID_RELEASE_KEY_PASSWORD }}
+
+      - name: Upload Gradle release log (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-release-build-log
+          path: gradle-release-build.log
+          retention-days: 7
 
       - name: Rename APKs
         run: |
