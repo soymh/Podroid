@@ -55,6 +55,10 @@ class VmBackupRepository @Inject constructor(
         const val IMAGE_EXT = ".img"
         const val MANIFEST_EXT = ".json"
         const val BACKUP_PREFIX = "podroid-vm-"
+        // SEEK_* come from <fcntl.h> (stable Linux UAPI, never renumbered):
+        // android.system.OsConstants does not expose them.
+        const val SEEK_DATA = 3
+        const val SEEK_HOLE = 4
     }
 
     fun backupDirectory(): File {
@@ -63,13 +67,6 @@ class VmBackupRepository @Inject constructor(
     }
 
     fun storageFile(): File = File(context.filesDir, STORAGE_IMG)
-
-    // SEEK_* come from <fcntl.h> (stable Linux UAPI, never renumbered):
-    // android.system.OsConstants does not expose them.
-    private companion object {
-        const val SEEK_DATA = 3
-        const val SEEK_HOLE = 4
-    }
 
     fun isDownloadsReachable(): Boolean {
         val dir = backupDirectory()
