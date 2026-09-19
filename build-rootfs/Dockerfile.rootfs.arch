@@ -37,6 +37,9 @@ RUN cd /work/overlay-normalize && make CC=gcc
 # openrc is AUR-only (built with --ignorearch: upstream tags i686/x86_64 only);
 # OpenRC service files come from openrc-arch-services-git (pinned to a known
 # commit for reproducibility). Both build as non-root (makepkg refuses root).
+# NOTE: for the systemd migration these AUR packages are gone — init is stock
+# systemd + systemd-sysvcompat, and all podroid-* bring-up lives in
+# files-arch/etc/systemd/system. Do NOT re-add the AUR stack.
 # NOTE: ArchLinuxARM ships neither elogind (it uses systemd-logind, which has
 # no OpenRC support and isn't needed headless) nor bridge-utils (deprecated;
 # iproute2 covers bridge setup) — do not re-add them.
@@ -130,23 +133,18 @@ RUN useradd -m builder \
         && makepkg -s --noconfirm \
         && sudo pacman -U --noconfirm ./*.pkg.tar*'
 
-# Drop build-time weight: dev toolchain, package cache, temp dirs, helper
-# account. linux-aarch64 is the distro kernel, not ours — remove only if present.
-# /var/lib/pacman/sync/* (repo DBs) are dropped too: re-fetchable in the guest
-# via `pacman -Sy`, and they cost tens of MB in the image. The local DB stays
-# (pacman -Q/-R need it).
-RUN pacman -Rns --noconfirm base-devel git \
-    && pacman -Scc --noconfirm \
-    && rm -rf /var/lib/pacman/sync/* \
+# Drop build-time weight: package cache, sync DBs (re-fetchable in the guest
+# via `pacman -Sy`; the local DB stays since pacman -Q/-R need it), temp dirs.
+# linux-aarch64 is the distro kernel, not ours — remove only if present.
+RUN pacman -Scc --noconfirm \
+    && rm -rf /var/lib/pacman/sync/* /tmp/aur \
     && if pacman -Qq linux-aarch64 >/dev/null 2>&1; then \
            pacman -Rns --noconfirm linux-aarch64; \
-       fi \
-    && userdel -r builder \
-    && rm -rf /tmp/aur /etc/sudoers.d/builder
+       fi
 
-# Hard assertion: the rootfs must contain openrc-run before packing.
-# Without it the guest cannot boot (init-podroid execs /sbin/init).
-RUN test -x /usr/bin/openrc-run || test -x /sbin/openrc-run || { echo "ERROR: openrc-run missing from rootfs"; exit 1; }
+# Hard assertion: PID 1 must resolve to systemd (init-podroid switch_roots
+# into /sbin/init, which systemd-sysvcompat links there).
+RUN test -x /usr/lib/systemd/systemd && test -e /sbin/init || { echo "ERROR: systemd init missing from rootfs"; exit 1; }
 
 # Pull in the vsock-agent / host-bridge binaries built in stage 1.
 COPY --from=vsock-builder /work/vsock-agent/podroid-vsock-agent /usr/local/bin/podroid-vsock-agent
@@ -154,6 +152,7 @@ COPY --from=vsock-builder /work/host-bridge/podroid-hostd /usr/local/bin/podroid
 COPY --from=vsock-builder /work/overlay-normalize/podroid-overlay-normalize /usr/local/bin/podroid-overlay-normalize
 
 COPY files /work/files
+COPY files-arch /work/files-arch
 COPY build-rootfs-arch.sh /work/build-rootfs-arch.sh
 
 # Relocate the tree under /work/rootfs for customization + packing. tar copy

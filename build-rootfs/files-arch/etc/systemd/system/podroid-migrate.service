@@ -1,0 +1,11 @@
+[Unit]
+Description=Podroid system migrations (runs versioned upgrade scripts once)
+Before=podroid-bootstrap.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/podroid/migrate.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

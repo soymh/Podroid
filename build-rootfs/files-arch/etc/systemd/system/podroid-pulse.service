@@ -1,0 +1,14 @@
+[Unit]
+Description=Podroid PulseAudio (PCM over TCP for in-app audio)
+After=podroid-bootstrap.service podroid-network.service
+Wants=podroid-bootstrap.service podroid-network.service
+Before=podroid-ready.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/lib/podroid/x11-pulse.sh
+StandardOutput=append:/var/log/pulse.log
+StandardError=inherit
+
+[Install]
+WantedBy=multi-user.target

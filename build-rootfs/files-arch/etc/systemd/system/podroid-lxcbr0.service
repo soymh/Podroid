@@ -1,0 +1,13 @@
+[Unit]
+Description=Podroid LXC bridge (lxcbr0, 10.0.3.1/24) + NAT/DHCP
+After=podroid-network.service
+Wants=podroid-network.service
+Before=lxc.service
+
+[Service]
+Type=forking
+PIDFile=/run/dnsmasq.lxcbr0.pid
+ExecStart=/usr/local/lib/podroid/lxcbr0.sh
+
+[Install]
+WantedBy=multi-user.target

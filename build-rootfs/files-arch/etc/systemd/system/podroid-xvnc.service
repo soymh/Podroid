@@ -1,0 +1,14 @@
+[Unit]
+Description=Podroid X11 server (Xvnc for in-app viewer)
+After=podroid-bootstrap.service podroid-network.service
+Wants=podroid-bootstrap.service podroid-network.service
+Before=podroid-ready.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/lib/podroid/x11-xvnc.sh
+StandardOutput=append:/var/log/xvnc.log
+StandardError=inherit
+
+[Install]
+WantedBy=multi-user.target

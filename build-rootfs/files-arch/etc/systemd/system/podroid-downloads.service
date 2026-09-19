@@ -1,0 +1,13 @@
+[Unit]
+Description=Podroid AVF Downloads share (9p over vsock, AVF only)
+ConditionKernelCommandLine=podroid.backend=avf
+After=podroid-bootstrap.service podroid-network.service podroid-vsock.service
+Wants=podroid-bootstrap.service podroid-network.service podroid-vsock.service
+Before=podroid-ready.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/podroid-vsock-agent downloads-9p
+
+[Install]
+WantedBy=multi-user.target

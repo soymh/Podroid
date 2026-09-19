@@ -1,0 +1,13 @@
+[Unit]
+Description=Podroid VM system bootstrap (cgroups, modules, devpts, sysctl, container binds)
+After=podroid-migrate.service
+Wants=podroid-migrate.service
+Before=podroid-network.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/podroid/bootstrap.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

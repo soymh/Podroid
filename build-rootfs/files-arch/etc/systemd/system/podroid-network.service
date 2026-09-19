@@ -1,0 +1,13 @@
+[Unit]
+Description=Podroid VM networking (static SLIRP on QEMU, DHCP on AVF)
+After=podroid-bootstrap.service
+Wants=podroid-bootstrap.service
+Before=podroid-ready.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/podroid/network.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

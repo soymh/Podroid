@@ -1,7 +1,8 @@
 #!/bin/sh
-# build-rootfs-arch.sh — customize a pacstrap'd Arch rootfs into a Podroid image.
-# Mirrors build-rootfs.sh: no chroot (x86_64 host can't exec aarch64 bins
-# without extra setup), so all runlevel wiring is done via direct symlinks.
+# build-rootfs-arch.sh — customize an ArchLinuxARM rootfs into a Podroid image.
+# ArchDroid boots systemd (stock units + files-arch units below). No chroot
+# (x86_64 host can't exec aarch64 bins without extra setup), so unit enabling
+# is done via direct symlinks — exactly what `systemctl enable` does.
 set -eu
 : "${ROOTFS:=/work/rootfs}"
 
@@ -33,18 +34,18 @@ sed -i "s|^root:[^:]*:|root:${ROOT_HASH}:|" "$ROOTFS/etc/shadow"
 rm -rf "$ROOTFS/usr/share/man" "$ROOTFS/usr/share/doc" \
        "$ROOTFS/usr/share/locale" "$ROOTFS/usr/share/info"
 
-# AUR openrc uses sysconfdir=/etc/openrc (avoids clashing with other init
-# systems): init scripts live in /etc/openrc/init.d, runlevels in
-# /etc/openrc/runlevels, rc.conf in /etc/openrc/rc.conf. All OpenRC paths
-# below go through $OERC. (/sbin/openrc* shebangs/paths still resolve via
-# the /sbin -> /usr/bin usrmerge symlink; /etc/inittab stays at /etc
-# because busybox init reads it there.)
-OERC="$ROOTFS/etc/openrc"
-mkdir -p "$OERC/init.d"
-
-# Remove the stock pulseaudio OpenRC service if one was shipped.
-# Podroid starts pulseaudio directly from podroid-x11 (start-stop-daemon).
-rm -f "$OERC/init.d/pulseaudio"
+# Podroid bring-up lives in files-arch as systemd units + lib scripts (no
+# OpenRC ships on this image anymore): install both here, enable below.
+SYSU="$ROOTFS/etc/systemd/system"
+mkdir -p "$SYSU" "$ROOTFS/usr/local/lib/podroid"
+cp /work/files-arch/etc/systemd/system/podroid-*.service "$SYSU/"
+cp /work/files-arch/usr/local/lib/podroid/*.sh "$ROOTFS/usr/local/lib/podroid/"
+chmod 0644 "$SYSU"/podroid-*.service
+chmod +x "$ROOTFS/usr/local/lib/podroid/"*.sh
+mkdir -p "$SYSU/serial-getty@.service.d"
+cp /work/files-arch/etc/systemd/system/serial-getty@.service.d/podroid.conf \
+    "$SYSU/serial-getty@.service.d/podroid.conf"
+chmod 0644 "$SYSU/serial-getty@.service.d/podroid.conf"
 
 # Pre-create podman storage dirs (saves first-boot mkdir).
 mkdir -p "$ROOTFS/var/lib/containers/storage" \
@@ -52,99 +53,28 @@ mkdir -p "$ROOTFS/var/lib/containers/storage" \
          "$ROOTFS/run/libpod" \
          "$ROOTFS/run/crun"
 
-# Copy Podroid OpenRC services (shared with Alpine).
-cp /work/files/etc/init.d/podroid-bootstrap "$OERC/init.d/"
-cp /work/files/etc/init.d/podroid-network   "$OERC/init.d/"
-cp /work/files/etc/init.d/podroid-resize    "$OERC/init.d/"
-cp /work/files/etc/init.d/podroid-ready     "$OERC/init.d/"
-cp /work/files/etc/init.d/podroid-x11       "$OERC/init.d/"
-cp /work/files/etc/init.d/podroid-vsock     "$OERC/init.d/"
-cp /work/files/etc/init.d/podroid-hostd     "$OERC/init.d/"
-cp /work/files/etc/init.d/podroid-downloads "$OERC/init.d/"
-cp /work/files/etc/init.d/podroid-migrate   "$OERC/init.d/"
-chmod +x "$OERC/init.d/podroid-"*
-
-# Minimal OpenRC wrappers for Arch-native daemons (same openrc-run style as
-# podroid-* scripts). Arch has no docker-openrc / lxc-openrc / dropbear-openrc
-# splits, so we ship tiny equivalents here instead of in files/ (keeps the
-# Alpine tree untouched).
-cat > "$OERC/init.d/docker" <<'EOF'
-#!/sbin/openrc-run
-description="Docker daemon"
-command="/usr/bin/dockerd"
-command_args="--iptables=true --ip6tables=true"
-pidfile="/run/docker.pid"
-depend() {
-    need podroid-network
-    after podroid-bootstrap
-}
-EOF
-cat > "$OERC/init.d/sshd" <<'EOF'
-#!/sbin/openrc-run
-description="OpenSSH server"
-# NOTE: no -D flag: like the reference openrc-arch-services script, let sshd
-# daemonize itself so it writes /run/sshd.pid (with -D the pidfile is never
-# written and OpenRC can't track the service).
-command="/usr/bin/sshd"
-pidfile="/run/sshd.pid"
-depend() {
-    need podroid-network
-}
-start_pre() {
-    # Privilege separation dir: normally created by systemd-tmpfiles, which
-    # doesn't exist under OpenRC — without it sshd refuses to start.
-    mkdir -p /run/sshd
-    chmod 0755 /run/sshd
-    [ -f /etc/ssh/ssh_host_ed25519_key ] || ssh-keygen -A
-}
-EOF
-cat > "$OERC/init.d/lxc" <<'EOF'
-#!/sbin/openrc-run
-description="LXC container autostart"
-command="/usr/bin/lxc-autostart"
-command_args=""
-depend() {
-    need podroid-network
-    after docker
-}
-start() {
-    ebegin "Starting LXC autostart containers"
-    lxc-autostart -a 2>/dev/null || true
-    eend 0
-}
-stop() {
-    ebegin "Stopping LXC containers"
-    lxc-autostart -s 2>/dev/null || true
-    eend 0
-}
-EOF
-cat > "$OERC/init.d/dnsmasq.lxcbr0" <<'EOF'
-#!/sbin/openrc-run
-description="LXC bridge (lxcbr0, 10.0.3.1/24) + NAT/DHCP"
-depend() {
-    need podroid-network
-    before lxc
-}
-start() {
-    ebegin "Setting up lxcbr0"
-    ip link show lxcbr0 >/dev/null 2>&1 || brctl addbr lxcbr0 2>/dev/null || ip link add lxcbr0 type bridge
-    ip addr add 10.0.3.1/24 dev lxcbr0 2>/dev/null || true
-    ip link set lxcbr0 up
-    iptables -t nat -C POSTROUTING -s 10.0.3.0/24 ! -d 10.0.3.0/24 -j MASQUERADE 2>/dev/null \
-        || iptables -t nat -A POSTROUTING -s 10.0.3.0/24 ! -d 10.0.3.0/24 -j MASQUERADE
-    start-stop-daemon --start --quiet --pidfile /run/dnsmasq.lxcbr0.pid --exec /usr/bin/dnsmasq -- \
-        --interface=lxcbr0 --except-interface=lo \
-        --bind-interfaces --dhcp-range=10.0.3.2,10.0.3.254,12h \
-        --pid-file=/run/dnsmasq.lxcbr0.pid || true
-    eend 0
-}
-stop() {
-    start-stop-daemon --stop --quiet --pidfile /run/dnsmasq.lxcbr0.pid || true
-    return 0
-}
-EOF
-chmod +x "$OERC/init.d/docker" "$OERC/init.d/sshd" \
-         "$OERC/init.d/lxc" "$OERC/init.d/dnsmasq.lxcbr0"
+# Enable units via direct symlinks — the same no-chroot technique the old
+# OpenRC runlevels used (`systemctl enable` is symlink creation underneath).
+# Stock units used as-shipped: sshd (+sshdgenkeys for first-boot host keys),
+# docker, lxc. Everything else is ours from files-arch.
+wants="$SYSU/multi-user.target.wants"
+mkdir -p "$wants"
+for unit in podroid-migrate.service podroid-bootstrap.service podroid-network.service \
+    podroid-resize.service podroid-hostd.service podroid-vsock.service \
+    podroid-downloads.service podroid-xvnc.service podroid-pulse.service \
+    podroid-lxcbr0.service podroid-ready.service \
+    sshd.service sshdgenkeys.service docker.service lxc.service; do
+    ln -sf "../$unit" "$wants/$unit"
+done
+# getty instances for both ttys (podroid-getty picks via podroid.tty=).
+mkdir -p "$SYSU/getty.target.wants"
+for tty in hvc0 ttyS0; do
+    ln -sf "/usr/lib/systemd/system/serial-getty@.service" "$SYSU/getty.target.wants/serial-getty@$tty.service"
+done
+# Default boot target: multi-user (no display manager in the VM).
+ln -sf "/usr/lib/systemd/system/multi-user.target" "$SYSU/default.target"
+# Silence stock getty@tty1 (no tty1 console here; would sit failed forever).
+ln -sf /dev/null "$SYSU/getty@tty1.service"
 
 # Copy /usr/local/bin helpers.
 mkdir -p "$ROOTFS/usr/local/bin"
@@ -182,7 +112,9 @@ done
 printf '%s\n' "${SYSTEM_VERSION:-0}" > "$ROOTFS/etc/podroid/system-version"
 chmod 0644 "$ROOTFS/etc/podroid/system-version"
 cp /work/files/etc/inittab "$ROOTFS/etc/inittab"
-cp /work/files/etc/rc.conf "$OERC/rc.conf"
+# NOTE: inittab/rc.conf are OpenRC artifacts, inert under systemd — copied
+# for provenance, never read. Boot target comes from the default.target
+# symlink wired above.
 # SSH auth drop-in (Arch default rejects root+password; see the file).
 mkdir -p "$ROOTFS/etc/ssh/sshd_config.d"
 cp /work/files/etc/ssh/sshd_config.d/podroid.conf "$ROOTFS/etc/ssh/sshd_config.d/podroid.conf"
@@ -215,18 +147,3 @@ Kernel \r on \m (\l)
                            (wheel group → can run sudo)
 
 EOF
-
-# Set runlevels via direct symlinks (can't chroot into aarch64 rootfs to run rc-update).
-mkdir -p "$OERC/runlevels/default" "$OERC/runlevels/boot"
-for svc in podroid-migrate podroid-bootstrap podroid-network podroid-resize sshd docker lxc dnsmasq.lxcbr0 podroid-x11 podroid-vsock podroid-downloads podroid-hostd podroid-ready; do
-    if [ -e "$OERC/init.d/$svc" ]; then
-        ln -sf "/etc/openrc/init.d/$svc" "$OERC/runlevels/default/$svc"
-    else
-        echo "WARN: init script /etc/openrc/init.d/$svc missing, skipping runlevel symlink"
-    fi
-done
-
-# Disable services we don't need (initramfs already handles them, or they're noise in the VM).
-for svc in hwclock swclock urandom networking sysctl bootmisc syslog keymaps; do
-    rm -f "$OERC/runlevels/boot/$svc" "$OERC/runlevels/default/$svc"
-done

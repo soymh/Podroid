@@ -34,8 +34,12 @@ start() {
         # SLIRP-style 10.0.2.15 hardcode won't sit on the right subnet (on
         # IPv6-only cellular w/ CLAT it lands on 192.0.0.x). udhcpc applies
         # everything via the default /usr/share/udhcpc/default.script.
+        # Fallback is dhcpcd (Alpine links no udhcpc applet on some images;
+        # Arch ships dhcpcd instead): -4 -w waits up to -t seconds for a v4
+        # lease. Either way the post-check below decides success.
         udhcpc -i "$NETIF" -t 8 -T 1 -A 1 -q -f -n 2>/dev/null || \
-            udhcpc -i "$NETIF" -q -f -n 2>/dev/null || true
+            udhcpc -i "$NETIF" -q -f -n 2>/dev/null || \
+            dhcpcd -4 -w -t 20 "$NETIF" 2>/dev/null || true
         # Belt-and-suspenders: if DHCP didn't write resolv.conf (busybox
         # variants differ), drop public DNS so apk/curl don't die silently.
         [ -s /etc/resolv.conf ] || printf 'nameserver 8.8.8.8\nnameserver 1.1.1.1\n' > /etc/resolv.conf

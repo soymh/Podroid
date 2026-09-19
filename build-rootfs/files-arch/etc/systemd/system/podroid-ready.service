@@ -1,0 +1,12 @@
+[Unit]
+Description=Podroid VM ready marker (consumed by Android boot detector)
+After=podroid-network.service podroid-bootstrap.service podroid-resize.service podroid-hostd.service podroid-vsock.service podroid-downloads.service podroid-xvnc.service podroid-pulse.service podroid-lxcbr0.service sshd.service docker.service lxc.service
+Wants=podroid-network.service podroid-bootstrap.service podroid-resize.service podroid-hostd.service podroid-vsock.service podroid-downloads.service podroid-xvnc.service podroid-pulse.service podroid-lxcbr0.service sshd.service docker.service lxc.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/podroid/ready.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
