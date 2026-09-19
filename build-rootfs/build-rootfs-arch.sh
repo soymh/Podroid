@@ -131,9 +131,10 @@ mkdir -p "$ROOTFS/etc/containers"
 cp /work/files/etc/containers/storage.conf "$ROOTFS/etc/containers/storage.conf"
 chmod 0644 "$ROOTFS/etc/containers/storage.conf"
 
-# Hostname.
-echo "podroid" > "$ROOTFS/etc/hostname"
-echo "127.0.0.1 localhost podroid" > "$ROOTFS/etc/hosts"
+# Hostname (archdroid: distinct from Alpine's "podroid" on the network too,
+# now that both guests can run side by side).
+echo "archdroid" > "$ROOTFS/etc/hostname"
+echo "127.0.0.1 localhost archdroid" > "$ROOTFS/etc/hosts"
 echo "::1 localhost ip6-localhost" >> "$ROOTFS/etc/hosts"
 
 # Login banner.
