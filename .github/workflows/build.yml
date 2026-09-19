@@ -180,7 +180,10 @@ jobs:
           distribution: 'temurin'
 
       - name: Build debug APKs
-        run: ./gradlew assembleAlpineDebug assembleArchDebug --console=plain --stacktrace 2>&1 | tee gradle-build.log
+        # pipefail: without it, `| tee` masks a Gradle failure as step success.
+        run: |
+          set -o pipefail
+          ./gradlew assembleAlpineDebug assembleArchDebug --console=plain --stacktrace 2>&1 | tee gradle-build.log
 
       - name: Upload Gradle build log (on failure)
         if: failure()
@@ -274,7 +277,10 @@ jobs:
         run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
 
       - name: Build release APKs
-        run: ./gradlew assembleAlpineRelease assembleArchRelease --console=plain --stacktrace 2>&1 | tee gradle-release-build.log
+        # pipefail: without it, `| tee` masks a Gradle failure as step success.
+        run: |
+          set -o pipefail
+          ./gradlew assembleAlpineRelease assembleArchRelease --console=plain --stacktrace 2>&1 | tee gradle-release-build.log
         env:
           PODROID_RELEASE_STORE_FILE: podroid-release.jks
           PODROID_RELEASE_STORE_PASSWORD: ${{ secrets.PODROID_RELEASE_STORE_PASSWORD }}
