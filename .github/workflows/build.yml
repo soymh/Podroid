@@ -61,14 +61,12 @@ jobs:
           retention-days: 1
 
   build-rootfs-arch:
-    runs-on: ubuntu-latest
+    # Native ARM64 runner: the whole stage is --platform=linux/arm64, so this
+    # removes the qemu-user emulation tax (openrc compile + zstd-19 packing
+    # dominated the ~65 min emulated build). No setup-qemu needed natively.
+    runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up QEMU for arm64
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
