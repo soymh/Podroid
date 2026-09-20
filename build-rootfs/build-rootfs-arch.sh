@@ -137,9 +137,11 @@ echo "archdroid" > "$ROOTFS/etc/hostname"
 echo "127.0.0.1 localhost archdroid" > "$ROOTFS/etc/hosts"
 echo "::1 localhost ip6-localhost" >> "$ROOTFS/etc/hosts"
 
-# Login banner.
+# Login banner, shown before the login prompt (printed by getty from
+# /etc/issue on Alpine, and explicitly by podroid-getty on ArchDroid where
+# agetty's own issue output doesn't reach this console).
 cat > "$ROOTFS/etc/issue" <<'EOF'
-Welcome to Podroid (Arch Linux)
+Welcome to ArchDroid (Arch Linux)
 Kernel \r on \m (\l)
 
   Default login:  root  /  archdroid

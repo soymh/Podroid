@@ -25,10 +25,24 @@ if [ "$TTY" = "$WANT" ]; then
     printf '\033[3J\033[2J\033[H' > "/dev/$TTY" 2>/dev/null
     # getty binary differs by distro: busybox `getty` on Alpine, util-linux
     # `agetty` on Arch. Same flags work on both; prefer getty when present.
+    # Banner display differs too: busybox getty always prints /etc/issue,
+    # while agetty's issue output doesn't reliably reach this console — so on
+    # the agetty path print it explicitly here and pass --noissue to avoid a
+    # double banner (busybox getty has no --noissue flag, hence the branch).
     GETTY="$(command -v getty 2>/dev/null || true)"
-    [ -n "$GETTY" ] || GETTY="$(command -v agetty 2>/dev/null || true)"
+    if [ -n "$GETTY" ]; then
+        exec "$GETTY" -L -l /usr/local/bin/podroid-login 115200 "$TTY" xterm-256color
+    fi
+    GETTY="$(command -v agetty 2>/dev/null || true)"
     [ -n "$GETTY" ] || { echo "podroid-getty: no getty binary found" > /dev/console; exit 1; }
-    exec "$GETTY" -L -l /usr/local/bin/podroid-login 115200 "$TTY" xterm-256color
+    # Explicit banner: expand getty's \r (kernel release) / \m (arch) /
+    # \l (tty line) escapes ourselves, since --noissue skips agetty's own
+    # rendering (which doesn't reach this console).
+    if [ -r /etc/issue ]; then
+        sed -e "s/\\\\r/$(uname -r)/" -e "s/\\\\m/$(uname -m)/" -e "s/\\\\l/$TTY/" \
+            /etc/issue > "/dev/$TTY" 2>/dev/null || true
+    fi
+    exec "$GETTY" --noissue -L -l /usr/local/bin/podroid-login 115200 "$TTY" xterm-256color
 fi
 
 # Wrong tty for this backend. Sleep instead of exiting so busybox init
