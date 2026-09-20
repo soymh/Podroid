@@ -212,8 +212,13 @@ fun ContainerBackupScreen(
                     onClick = viewModel::backupVm,
                     enabled = ui.vmStopped && ui.vmProgress == null,
                 )
-                if (ui.vmProgress != null) {
-                    val pct = (ui.vmProgress!! * 100).toInt()
+                // Hoist once: ui re-reads live state on every access, so a
+                // `ui.vmProgress!!` inside the progress lambda can observe
+                // null after completion flips it mid-recomposition (crashed
+                // here). The local is snapshot-consistent for this pass.
+                val vmProgress = ui.vmProgress
+                if (vmProgress != null) {
+                    val pct = (vmProgress * 100).toInt()
                     Text(
                         text = "$pct%",
                         style = MaterialTheme.typography.bodyMedium,
@@ -221,7 +226,7 @@ fun ContainerBackupScreen(
                         fontFamily = FontFamily.Monospace,
                     )
                     LinearProgressIndicator(
-                        progress = { ui.vmProgress!! },
+                        progress = { vmProgress },
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }

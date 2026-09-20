@@ -37,10 +37,18 @@ if [ "$TTY" = "$WANT" ]; then
     [ -n "$GETTY" ] || { echo "podroid-getty: no getty binary found" > /dev/console; exit 1; }
     # Explicit banner: expand getty's \r (kernel release) / \m (arch) /
     # \l (tty line) escapes ourselves, since --noissue skips agetty's own
-    # rendering (which doesn't reach this console).
+    # rendering (which doesn't reach this console). Outcome is logged to the
+    # journal so a missing first-boot banner is diagnosable (first spawn may
+    # race console/reader readiness; respawns are known good).
     if [ -r /etc/issue ]; then
-        sed -e "s/\\\\r/$(uname -r)/" -e "s/\\\\m/$(uname -m)/" -e "s/\\\\l/$TTY/" \
-            /etc/issue > "/dev/$TTY" 2>/dev/null || true
+        if sed -e "s/\\\\r/$(uname -r)/" -e "s/\\\\m/$(uname -m)/" -e "s/\\\\l/$TTY/" \
+                /etc/issue > "/dev/$TTY" 2>/dev/null; then
+            logger -t podroid-getty "banner shown on $TTY" 2>/dev/null || true
+        else
+            logger -t podroid-getty "banner FAILED on $TTY (rc=$?)" 2>/dev/null || true
+        fi
+    else
+        logger -t podroid-getty "no /etc/issue for $TTY" 2>/dev/null || true
     fi
     exec "$GETTY" --noissue -L -l /usr/local/bin/podroid-login 115200 "$TTY" xterm-256color
 fi
