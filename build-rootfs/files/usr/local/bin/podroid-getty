@@ -24,33 +24,19 @@ if [ "$TTY" = "$WANT" ]; then
     # clean login. No-op-ish on QEMU, where the console is a separate serial tty.
     printf '\033[3J\033[2J\033[H' > "/dev/$TTY" 2>/dev/null
     # getty binary differs by distro: busybox `getty` on Alpine, util-linux
-    # `agetty` on Arch. Same flags work on both; prefer getty when present.
-    # Banner display differs too: busybox getty always prints /etc/issue,
-    # while agetty's issue output doesn't reliably reach this console — so on
-    # the agetty path print it explicitly here and pass --noissue to avoid a
-    # double banner (busybox getty has no --noissue flag, hence the branch).
+    # `agetty` on Arch (/sbin/getty exists nowhere on Arch). Same flags work
+    # on both; prefer getty when present. No --noissue: agetty re-displays
+    # /etc/issue on every login reprompt (verified in upstream source), which
+    # is exactly what restores the banner when the bridge's connect-time CR
+    # retriggers the prompt after boot-time output was discarded with no
+    # reader attached. The manual print this replaces only ever doubled it.
     GETTY="$(command -v getty 2>/dev/null || true)"
     if [ -n "$GETTY" ]; then
         exec "$GETTY" -L -l /usr/local/bin/podroid-login 115200 "$TTY" xterm-256color
     fi
     GETTY="$(command -v agetty 2>/dev/null || true)"
     [ -n "$GETTY" ] || { echo "podroid-getty: no getty binary found" > /dev/console; exit 1; }
-    # Explicit banner: expand getty's \r (kernel release) / \m (arch) /
-    # \l (tty line) escapes ourselves, since --noissue skips agetty's own
-    # rendering (which doesn't reach this console). Outcome is logged to the
-    # journal so a missing first-boot banner is diagnosable (first spawn may
-    # race console/reader readiness; respawns are known good).
-    if [ -r /etc/issue ]; then
-        if sed -e "s/\\\\r/$(uname -r)/" -e "s/\\\\m/$(uname -m)/" -e "s/\\\\l/$TTY/" \
-                /etc/issue > "/dev/$TTY" 2>/dev/null; then
-            logger -t podroid-getty "banner shown on $TTY" 2>/dev/null || true
-        else
-            logger -t podroid-getty "banner FAILED on $TTY (rc=$?)" 2>/dev/null || true
-        fi
-    else
-        logger -t podroid-getty "no /etc/issue for $TTY" 2>/dev/null || true
-    fi
-    exec "$GETTY" --noissue -L -l /usr/local/bin/podroid-login 115200 "$TTY" xterm-256color
+    exec "$GETTY" -L -l /usr/local/bin/podroid-login 115200 "$TTY" xterm-256color
 fi
 
 # Wrong tty for this backend. Sleep instead of exiting so busybox init
